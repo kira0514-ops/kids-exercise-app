@@ -2,6 +2,7 @@ package com.kira.stockscope.ui.detail
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -97,6 +98,7 @@ private fun ReportBody(report: StockReport) {
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         HeaderSection(report)
+        ChartSection(report.snapshot.symbol)
         ConvictionSection(report.score)
         FundamentalsSection(report.fundamentals)
         SectorSection(report.sector)
@@ -143,6 +145,13 @@ private fun HeaderSection(report: StockReport) {
             Text(Formatters.percent(snapshot.changePercent, alreadyPercentScale = true), color = changeColor, fontWeight = FontWeight.Bold)
         }
         Text("Market cap ${Formatters.compactNumber(snapshot.marketCap)}", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun ChartSection(symbol: String) {
+    SectionCard(title = "Chart") {
+        TradingViewChartCard(symbol = symbol, darkTheme = isSystemInDarkTheme())
     }
 }
 
