@@ -82,10 +82,10 @@ class StockRepository(
             val score = ScoringEngine.score(fundamentals, sector, snapshot)
             val asymmetry = ScoringEngine.asymmetryTargets(snapshot, fundamentals, sector)
             val analystView = AnalystView(
-                recommendationKey = target.raw.financialData?.recommendationKey,
-                targetMean = target.raw.financialData?.targetMeanPrice.raw(),
-                targetHigh = target.raw.financialData?.targetHighPrice.raw(),
-                targetLow = target.raw.financialData?.targetLowPrice.raw()
+                recommendationKey = target.raw?.financialData?.recommendationKey,
+                targetMean = target.raw?.financialData?.targetMeanPrice.raw(),
+                targetHigh = target.raw?.financialData?.targetHighPrice.raw(),
+                targetLow = target.raw?.financialData?.targetLowPrice.raw()
             )
             val technicals = fetchTechnicals(ticker)
 
@@ -97,7 +97,7 @@ class StockRepository(
                 score = score,
                 narrative = narrative,
                 analystView = analystView,
-                businessSummary = target.raw.assetProfile?.longBusinessSummary,
+                businessSummary = target.raw?.assetProfile?.longBusinessSummary,
                 technicals = technicals
             )
         }
@@ -133,29 +133,53 @@ class StockRepository(
     private data class TargetFetch(
         val snapshot: StockSnapshot,
         val fundamentals: Fundamentals,
-        val raw: QuoteSummaryResult
+        /** Null when quoteSummary itself failed but the chart endpoint still resolved a price. */
+        val raw: QuoteSummaryResult?
     )
 
+    /**
+     * quoteSummary needs the crumb and is the one endpoint Yahoo is most likely to
+     * block; the chart endpoint historically doesn't. So quoteSummary failing
+     * entirely — not just a field inside it being missing — no longer fails the
+     * whole fetch: it falls back to a bare snapshot built from chart data (price,
+     * name) with empty fundamentals, and only genuinely errors if *neither*
+     * endpoint could resolve the ticker at all.
+     */
     private suspend fun fetchTarget(ticker: String, crumb: String?): TargetFetch {
-        val result = api.getQuoteSummary(QUOTE_SUMMARY_URL + ticker, QUOTE_SUMMARY_MODULES, crumb)
-            .quoteSummary.result?.firstOrNull()
-            ?: error("No data returned for \"$ticker\". Check the ticker symbol.")
+        val quoteSummaryResult = runCatching {
+            api.getQuoteSummary(QUOTE_SUMMARY_URL + ticker, QUOTE_SUMMARY_MODULES, crumb)
+                .quoteSummary.result?.firstOrNull()
+        }.getOrNull()
 
-        var snapshot = mapSnapshot(ticker, result)
-        val fundamentals = mapFundamentals(result)
+        var snapshot = quoteSummaryResult?.let { mapSnapshot(ticker, it) }
+        val fundamentals = quoteSummaryResult?.let { mapFundamentals(it) } ?: Fundamentals.EMPTY
 
-        if (snapshot.price == null) {
+        if (snapshot?.price == null) {
             val chartMeta = runCatching { api.getChart(CHART_URL + ticker) }.getOrNull()
                 ?.chart?.result?.firstOrNull()?.meta
             if (chartMeta != null) {
-                snapshot = snapshot.copy(
-                    price = chartMeta.regularMarketPrice ?: chartMeta.previousClose,
-                    name = snapshot.name.ifBlank { chartMeta.longName ?: chartMeta.shortName ?: ticker }
+                val fallbackName = chartMeta.longName ?: chartMeta.shortName ?: ticker
+                val fallbackPrice = chartMeta.regularMarketPrice ?: chartMeta.previousClose
+                snapshot = snapshot?.copy(
+                    price = snapshot.price ?: fallbackPrice,
+                    name = snapshot.name.ifBlank { fallbackName }
+                ) ?: StockSnapshot(
+                    symbol = ticker,
+                    name = fallbackName,
+                    sector = null,
+                    industry = null,
+                    currency = chartMeta.currency,
+                    price = fallbackPrice,
+                    changePercent = null,
+                    marketCap = null
                 )
             }
         }
 
-        return TargetFetch(snapshot, fundamentals, result)
+        val finalSnapshot = snapshot
+            ?: error("Couldn't reach Yahoo Finance for \"$ticker\" — check your connection and try again.")
+
+        return TargetFetch(finalSnapshot, fundamentals, quoteSummaryResult)
     }
 
     /**

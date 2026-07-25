@@ -35,6 +35,18 @@ data class Fundamentals(
 ) {
     val netCash: Double?
         get() = if (totalCash != null && totalDebt != null) totalCash - totalDebt else null
+
+    companion object {
+        /** Used when quoteSummary is unreachable but a bare price still came back from the chart endpoint. */
+        val EMPTY = Fundamentals(
+            trailingPe = null, forwardPe = null, trailingEps = null, forwardEps = null,
+            revenueGrowth = null, earningsGrowth = null, nextYearGrowthEstimate = null,
+            grossMargin = null, operatingMargin = null, profitMargin = null,
+            totalCash = null, totalDebt = null, freeCashFlow = null, dividendYield = null,
+            beta = null, debtToEquity = null, fiftyTwoWeekLow = null, fiftyTwoWeekHigh = null,
+            fiftyDayAverage = null, twoHundredDayAverage = null
+        )
+    }
 }
 
 data class PeerRow(

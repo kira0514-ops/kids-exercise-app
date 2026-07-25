@@ -50,7 +50,9 @@ object NetworkModule {
     }
 
     private val loggingInterceptor = HttpLoggingInterceptor().apply {
-        level = HttpLoggingInterceptor.Level.BASIC
+        // BODY (not just BASIC) so a real failure shows up in `adb logcat` as the
+        // actual response Yahoo sent back, not just a status line.
+        level = HttpLoggingInterceptor.Level.BODY
     }
 
     /**
@@ -80,9 +82,15 @@ object NetworkModule {
         OkHttpClient.Builder()
             .cookieJar(inMemoryCookieJar)
             .addInterceptor { chain ->
+                // Origin/Referer make these look like XHR calls from a finance.yahoo.com
+                // page (which is what they actually are, in a real browser) rather than
+                // a bare server-to-server request — Yahoo's edge is known to be pickier
+                // about the latter.
                 val request = chain.request().newBuilder()
                     .header("User-Agent", USER_AGENT)
                     .header("Accept", "application/json")
+                    .header("Origin", "https://finance.yahoo.com")
+                    .header("Referer", "https://finance.yahoo.com/")
                     .build()
                 chain.proceed(request)
             }

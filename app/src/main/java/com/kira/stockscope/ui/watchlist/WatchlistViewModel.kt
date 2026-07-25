@@ -87,8 +87,8 @@ class WatchlistViewModel(
                     loadedSymbols.add(symbol)
                     rowCache.update { it + (symbol to quote.toLoadedRow(symbol)) }
                 },
-                onFailure = {
-                    _addError.value = "Couldn't find \"$symbol\". Check the ticker symbol."
+                onFailure = { error ->
+                    _addError.value = "\"$symbol\": ${error.message ?: "couldn't load. Check the ticker symbol."}"
                 }
             )
         }

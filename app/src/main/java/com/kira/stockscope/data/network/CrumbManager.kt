@@ -12,18 +12,19 @@ import okhttp3.Request
  * endpoints. This primes a cookie against fc.yahoo.com, then exchanges it for a
  * crumb via the getcrumb endpoint, and caches the result in memory. Best-effort:
  * if either step fails, callers fall back to unauthenticated requests, which still
- * work for the chart endpoint.
+ * work for the chart endpoint — but every call retries the exchange until it
+ * actually succeeds once. A single early failure (e.g. the network not being up
+ * yet right after app launch) must not permanently disable the crumb for the rest
+ * of the process's life, which is what happened when this only tried once ever.
  */
 class CrumbManager(private val client: OkHttpClient) {
 
     private val mutex = Mutex()
     private var cachedCrumb: String? = null
-    private var primed = false
 
     suspend fun getCrumb(): String? = mutex.withLock {
-        if (!primed) {
+        if (cachedCrumb == null) {
             primeCookieAndCrumb()
-            primed = true
         }
         cachedCrumb
     }
