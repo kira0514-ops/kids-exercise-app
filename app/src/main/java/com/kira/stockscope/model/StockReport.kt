@@ -97,6 +97,23 @@ data class NewsItem(
     val publishedAtEpochSeconds: Long?
 )
 
+data class AnalystView(
+    val recommendationKey: String?,
+    val targetMean: Double?,
+    val targetHigh: Double?,
+    val targetLow: Double?
+) {
+    /** e.g. "strong_buy" -> "Strong buy" */
+    val recommendationLabel: String?
+        get() = recommendationKey
+            ?.replace('_', ' ')
+            ?.lowercase()
+            ?.replaceFirstChar { it.uppercase() }
+
+    val hasData: Boolean
+        get() = recommendationKey != null || targetMean != null
+}
+
 data class StockReport(
     val snapshot: StockSnapshot,
     val fundamentals: Fundamentals,
@@ -104,6 +121,7 @@ data class StockReport(
     val asymmetry: AsymmetryTargets,
     val score: ConvictionScore,
     val narrative: List<NewsItem>,
+    val analystView: AnalystView,
     val businessSummary: String?
 )
 

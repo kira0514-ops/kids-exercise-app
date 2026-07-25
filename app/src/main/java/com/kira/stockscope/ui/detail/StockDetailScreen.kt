@@ -39,6 +39,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.kira.stockscope.R
+import com.kira.stockscope.model.AnalystView
 import com.kira.stockscope.model.AsymmetryTargets
 import com.kira.stockscope.model.ConvictionScore
 import com.kira.stockscope.model.Fundamentals
@@ -103,7 +104,7 @@ private fun ReportBody(report: StockReport) {
         FundamentalsSection(report.fundamentals)
         SectorSection(report.sector)
         AsymmetrySection(report.asymmetry)
-        NarrativeSection(report.narrative, report.businessSummary)
+        NarrativeSection(report.narrative, report.businessSummary, report.analystView)
         Text(
             stringResource(R.string.disclaimer),
             style = MaterialTheme.typography.labelSmall,
@@ -344,8 +345,29 @@ private fun TargetRow(label: String, target: Double?, current: Double?, color: a
 }
 
 @Composable
-private fun NarrativeSection(news: List<NewsItem>, businessSummary: String?) {
+private fun AnalystViewRow(analystView: AnalystView) {
+    Column {
+        analystView.recommendationLabel?.let { label ->
+            KeyValueRow("Analyst consensus", label)
+        }
+        if (analystView.targetLow != null || analystView.targetMean != null || analystView.targetHigh != null) {
+            KeyValueRow(
+                "Analyst price target (low / mean / high)",
+                "${Formatters.price(analystView.targetLow)} / ${Formatters.price(analystView.targetMean)} / ${Formatters.price(analystView.targetHigh)}"
+            )
+        }
+    }
+}
+
+@Composable
+private fun NarrativeSection(news: List<NewsItem>, businessSummary: String?, analystView: AnalystView) {
     SectionCard(title = "Narrative") {
+        if (analystView.hasData) {
+            AnalystViewRow(analystView)
+            Spacer(Modifier.size(12.dp))
+            HorizontalDivider()
+            Spacer(Modifier.size(8.dp))
+        }
         if (!businessSummary.isNullOrBlank()) {
             Text(businessSummary, style = MaterialTheme.typography.bodySmall)
             Spacer(Modifier.size(12.dp))

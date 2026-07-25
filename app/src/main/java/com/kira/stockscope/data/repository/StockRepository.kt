@@ -10,6 +10,7 @@ import com.kira.stockscope.data.network.YahooFinanceApi.Companion.SEARCH_URL
 import com.kira.stockscope.data.network.dto.QuoteSummaryResult
 import com.kira.stockscope.data.network.dto.RawFmt
 import com.kira.stockscope.domain.ScoringEngine
+import com.kira.stockscope.model.AnalystView
 import com.kira.stockscope.model.Fundamentals
 import com.kira.stockscope.model.NewsItem
 import com.kira.stockscope.model.PeerRow
@@ -85,6 +86,12 @@ class StockRepository(
 
             val score = ScoringEngine.score(fundamentals, sector, snapshot)
             val asymmetry = ScoringEngine.asymmetryTargets(snapshot, fundamentals, sector)
+            val analystView = AnalystView(
+                recommendationKey = targetResult.financialData?.recommendationKey,
+                targetMean = targetResult.financialData?.targetMeanPrice.raw(),
+                targetHigh = targetResult.financialData?.targetHighPrice.raw(),
+                targetLow = targetResult.financialData?.targetLowPrice.raw()
+            )
 
             StockReport(
                 snapshot = snapshot,
@@ -93,6 +100,7 @@ class StockRepository(
                 asymmetry = asymmetry,
                 score = score,
                 narrative = narrative,
+                analystView = analystView,
                 businessSummary = targetResult.assetProfile?.longBusinessSummary
             )
         }
