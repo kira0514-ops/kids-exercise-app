@@ -93,17 +93,22 @@ class WatchlistViewModel(
     private fun loadRow(symbol: String) {
         rowCache.update { it + (symbol to RowState.Loading(symbol)) }
         viewModelScope.launch {
-            val result = repository.getReport(symbol)
+            // A quick quote (one request) rather than the full report (target + up
+            // to 5 peers + news + recommendations) — the watchlist just needs price
+            // and a score, and fetching the full report per row would multiply into
+            // dozens of Yahoo requests as soon as more than one or two tickers are
+            // watched, tripping their rate limiting.
+            val result = repository.getQuickQuote(symbol)
             val newState = result.fold(
-                onSuccess = { report ->
+                onSuccess = { quote ->
                     RowState.Loaded(
                         symbol = symbol,
-                        name = report.snapshot.name,
-                        price = report.snapshot.price,
-                        changePercent = report.snapshot.changePercent,
-                        currency = report.snapshot.currency,
-                        scoreTotal = report.score.total,
-                        tier = report.score.tier
+                        name = quote.snapshot.name,
+                        price = quote.snapshot.price,
+                        changePercent = quote.snapshot.changePercent,
+                        currency = quote.snapshot.currency,
+                        scoreTotal = quote.score.total,
+                        tier = quote.score.tier
                     )
                 },
                 onFailure = { error ->

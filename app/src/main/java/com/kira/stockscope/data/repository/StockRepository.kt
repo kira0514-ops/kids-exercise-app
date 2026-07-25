@@ -14,6 +14,7 @@ import com.kira.stockscope.model.AnalystView
 import com.kira.stockscope.model.Fundamentals
 import com.kira.stockscope.model.NewsItem
 import com.kira.stockscope.model.PeerRow
+import com.kira.stockscope.model.QuickQuote
 import com.kira.stockscope.model.SectorComparison
 import com.kira.stockscope.model.StockReport
 import com.kira.stockscope.model.StockSnapshot
@@ -28,28 +29,19 @@ class StockRepository(
     private val crumbManager: CrumbManager
 ) {
 
+    /**
+     * The full 5-pass report: target quote + up to 5 peer quotes + news + a
+     * recommendations lookup. Reserved for the detail screen; the watchlist uses
+     * [getQuickQuote] instead so adding several tickers doesn't fan out into
+     * dozens of Yahoo requests and trip their rate limiting.
+     */
     suspend fun getReport(symbol: String): Result<StockReport> = withContext(Dispatchers.IO) {
         runCatching {
             val ticker = symbol.trim().uppercase()
             val crumb = runCatching { crumbManager.getCrumb() }.getOrNull()
-
-            val targetResult = api.getQuoteSummary(QUOTE_SUMMARY_URL + ticker, QUOTE_SUMMARY_MODULES, crumb)
-                .quoteSummary.result?.firstOrNull()
-                ?: error("No data returned for \"$ticker\". Check the ticker symbol.")
-
-            var snapshot = mapSnapshot(ticker, targetResult)
-            val fundamentals = mapFundamentals(targetResult)
-
-            if (snapshot.price == null) {
-                val chartMeta = runCatching { api.getChart(CHART_URL + ticker) }.getOrNull()
-                    ?.chart?.result?.firstOrNull()?.meta
-                if (chartMeta != null) {
-                    snapshot = snapshot.copy(
-                        price = chartMeta.regularMarketPrice ?: chartMeta.previousClose,
-                        name = snapshot.name.ifBlank { chartMeta.longName ?: chartMeta.shortName ?: ticker }
-                    )
-                }
-            }
+            val target = fetchTarget(ticker, crumb)
+            val snapshot = target.snapshot
+            val fundamentals = target.fundamentals
 
             val peerSymbols = resolvePeerSymbols(ticker, snapshot.sector, crumb)
             val peerRows = coroutineScope {
@@ -87,10 +79,10 @@ class StockRepository(
             val score = ScoringEngine.score(fundamentals, sector, snapshot)
             val asymmetry = ScoringEngine.asymmetryTargets(snapshot, fundamentals, sector)
             val analystView = AnalystView(
-                recommendationKey = targetResult.financialData?.recommendationKey,
-                targetMean = targetResult.financialData?.targetMeanPrice.raw(),
-                targetHigh = targetResult.financialData?.targetHighPrice.raw(),
-                targetLow = targetResult.financialData?.targetLowPrice.raw()
+                recommendationKey = target.raw.financialData?.recommendationKey,
+                targetMean = target.raw.financialData?.targetMeanPrice.raw(),
+                targetHigh = target.raw.financialData?.targetHighPrice.raw(),
+                targetLow = target.raw.financialData?.targetLowPrice.raw()
             )
 
             StockReport(
@@ -101,9 +93,64 @@ class StockRepository(
                 score = score,
                 narrative = narrative,
                 analystView = analystView,
-                businessSummary = targetResult.assetProfile?.longBusinessSummary
+                businessSummary = target.raw.assetProfile?.longBusinessSummary
             )
         }
+    }
+
+    /**
+     * One network call (two if the price needs the chart fallback): target
+     * quote only, no peers/news/recommendations. The conviction score it
+     * returns is real but its valuation subscore falls back to neutral since
+     * there's no peer P/E to compare against.
+     */
+    suspend fun getQuickQuote(symbol: String): Result<QuickQuote> = withContext(Dispatchers.IO) {
+        runCatching {
+            val ticker = symbol.trim().uppercase()
+            val crumb = runCatching { crumbManager.getCrumb() }.getOrNull()
+            val target = fetchTarget(ticker, crumb)
+
+            val noPeerData = SectorComparison(
+                peers = emptyList(),
+                targetSymbol = ticker,
+                peerAverageForwardPe = null,
+                peerAverageTrailingPe = null,
+                peerLowForwardPe = null,
+                peerHighForwardPe = null,
+                targetRankByForwardPe = null,
+                totalRanked = 0
+            )
+            val score = ScoringEngine.score(target.fundamentals, noPeerData, target.snapshot)
+            QuickQuote(target.snapshot, score)
+        }
+    }
+
+    private data class TargetFetch(
+        val snapshot: StockSnapshot,
+        val fundamentals: Fundamentals,
+        val raw: QuoteSummaryResult
+    )
+
+    private suspend fun fetchTarget(ticker: String, crumb: String?): TargetFetch {
+        val result = api.getQuoteSummary(QUOTE_SUMMARY_URL + ticker, QUOTE_SUMMARY_MODULES, crumb)
+            .quoteSummary.result?.firstOrNull()
+            ?: error("No data returned for \"$ticker\". Check the ticker symbol.")
+
+        var snapshot = mapSnapshot(ticker, result)
+        val fundamentals = mapFundamentals(result)
+
+        if (snapshot.price == null) {
+            val chartMeta = runCatching { api.getChart(CHART_URL + ticker) }.getOrNull()
+                ?.chart?.result?.firstOrNull()?.meta
+            if (chartMeta != null) {
+                snapshot = snapshot.copy(
+                    price = chartMeta.regularMarketPrice ?: chartMeta.previousClose,
+                    name = snapshot.name.ifBlank { chartMeta.longName ?: chartMeta.shortName ?: ticker }
+                )
+            }
+        }
+
+        return TargetFetch(snapshot, fundamentals, result)
     }
 
     private suspend fun resolvePeerSymbols(ticker: String, sector: String?, crumb: String?): List<String> {

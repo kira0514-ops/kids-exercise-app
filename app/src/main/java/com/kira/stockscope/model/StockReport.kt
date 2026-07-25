@@ -130,3 +130,14 @@ data class WatchlistEntry(
     val symbol: String,
     val addedAtEpochMillis: Long
 )
+
+/**
+ * Cheap alternative to [StockReport] for the watchlist: one network call instead
+ * of the full report's target + peers + news + recommendations fan-out. The
+ * conviction score is still real, just computed without peer data, so its
+ * valuation subscore falls back to a neutral value instead of a peer-relative one.
+ */
+data class QuickQuote(
+    val snapshot: StockSnapshot,
+    val score: ConvictionScore
+)
