@@ -44,8 +44,11 @@ import com.kira.stockscope.model.AsymmetryTargets
 import com.kira.stockscope.model.ConvictionScore
 import com.kira.stockscope.model.Fundamentals
 import com.kira.stockscope.model.NewsItem
+import com.kira.stockscope.model.MacdReading
 import com.kira.stockscope.model.SectorComparison
 import com.kira.stockscope.model.StockReport
+import com.kira.stockscope.model.SwingPoint
+import com.kira.stockscope.model.TechnicalReading
 import com.kira.stockscope.ui.common.Formatters
 import com.kira.stockscope.ui.theme.BearRed
 import com.kira.stockscope.ui.theme.BullGreen
@@ -100,6 +103,7 @@ private fun ReportBody(report: StockReport) {
     ) {
         HeaderSection(report)
         ChartSection(report.snapshot.symbol)
+        TechnicalsSection(report.technicals, report.snapshot.price)
         ConvictionSection(report.score)
         FundamentalsSection(report.fundamentals)
         SectorSection(report.sector)
@@ -153,6 +157,206 @@ private fun HeaderSection(report: StockReport) {
 private fun ChartSection(symbol: String) {
     SectionCard(title = "Chart") {
         TradingViewChartCard(symbol = symbol, darkTheme = isSystemInDarkTheme())
+    }
+}
+
+@Composable
+private fun TechnicalsSection(technicals: TechnicalReading?, currentPrice: Double?) {
+    SectionCard(title = "Technicals") {
+        if (technicals == null) {
+            Text(
+                "Not enough price history to compute indicators yet.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            Text("Momentum", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+            RsiRow(technicals.rsi14)
+            StochasticRow(technicals.stochK, technicals.stochD)
+
+            Spacer(Modifier.size(10.dp))
+            HorizontalDivider()
+            Spacer(Modifier.size(8.dp))
+
+            Text("Trend", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+            MacdRow(technicals.macd)
+            AdxRow(technicals.adx14, technicals.plusDi14, technicals.minusDi14)
+
+            Spacer(Modifier.size(10.dp))
+            HorizontalDivider()
+            Spacer(Modifier.size(8.dp))
+
+            Text("Moving averages", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+            MovingAverageRow("SMA 20", technicals.sma20, currentPrice)
+            MovingAverageRow("SMA 50", technicals.sma50, currentPrice)
+            MovingAverageRow("SMA 200", technicals.sma200, currentPrice)
+
+            if (technicals.swingHigh != null || technicals.swingLow != null) {
+                Spacer(Modifier.size(10.dp))
+                HorizontalDivider()
+                Spacer(Modifier.size(8.dp))
+                Text("Swing levels", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                technicals.swingHigh?.let { SwingRow("Swing high", it, BullGreen) }
+                technicals.swingLow?.let { SwingRow("Swing low", it, BearRed) }
+            }
+        }
+    }
+}
+
+private fun rsiZone(rsi: Double): Pair<String, androidx.compose.ui.graphics.Color> = when {
+    rsi >= 70 -> "Overbought" to BearRed
+    rsi <= 30 -> "Oversold" to BullGreen
+    else -> "Neutral" to NeutralAmber
+}
+
+@Composable
+private fun RsiRow(rsi: Double?) {
+    if (rsi == null) {
+        KeyValueRow("RSI (14)", "--")
+        return
+    }
+    val (label, color) = rsiZone(rsi)
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("RSI (14)", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row {
+                Text("%.1f".format(rsi), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                Spacer(Modifier.size(6.dp))
+                Text(label, style = MaterialTheme.typography.bodySmall, color = color, fontWeight = FontWeight.Bold)
+            }
+        }
+        Spacer(Modifier.size(4.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(3.dp))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(fraction = (rsi / 100.0).toFloat().coerceIn(0f, 1f))
+                    .height(6.dp)
+                    .background(color, RoundedCornerShape(3.dp))
+            )
+        }
+    }
+}
+
+@Composable
+private fun StochasticRow(k: Double?, d: Double?) {
+    if (k == null || d == null) {
+        KeyValueRow("Stochastic (14,3,3)", "--")
+        return
+    }
+    val (label, color) = when {
+        k >= 80 -> "Overbought" to BearRed
+        k <= 20 -> "Oversold" to BullGreen
+        else -> "Neutral" to NeutralAmber
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text("Stochastic (14,3,3)", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row {
+            Text("%K %.1f / %D %.1f".format(k, d), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Spacer(Modifier.size(6.dp))
+            Text(label, style = MaterialTheme.typography.bodySmall, color = color, fontWeight = FontWeight.Bold)
+        }
+    }
+}
+
+@Composable
+private fun MacdRow(macd: MacdReading?) {
+    if (macd == null) {
+        KeyValueRow("MACD (12,26,9)", "--")
+        return
+    }
+    val bullish = macd.histogram > 0
+    val label = if (bullish) "Bullish" else "Bearish"
+    val color = if (bullish) BullGreen else BearRed
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("MACD (12,26,9)", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(label, style = MaterialTheme.typography.bodySmall, color = color, fontWeight = FontWeight.Bold)
+        }
+        Text(
+            "Line %.2f · Signal %.2f · Hist %.2f".format(macd.macd, macd.signal, macd.histogram),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun AdxRow(adx: Double?, plusDi: Double?, minusDi: Double?) {
+    if (adx == null) {
+        KeyValueRow("ADX (14)", "--")
+        return
+    }
+    val strength = when {
+        adx >= 25 -> "Strong trend"
+        adx >= 20 -> "Developing trend"
+        else -> "Weak / range-bound"
+    }
+    val plusLeads = plusDi != null && minusDi != null && plusDi >= minusDi
+    val directionColor = if (plusLeads) BullGreen else BearRed
+
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("ADX (14)", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("%.1f · $strength".format(adx), style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+        }
+        if (plusDi != null && minusDi != null) {
+            Text(
+                "${if (plusLeads) "+DI leading" else "-DI leading"} (+DI %.1f / -DI %.1f)".format(plusDi, minusDi),
+                style = MaterialTheme.typography.labelSmall,
+                color = directionColor
+            )
+        }
+    }
+}
+
+@Composable
+private fun MovingAverageRow(label: String, average: Double?, currentPrice: Double?) {
+    if (average == null) {
+        KeyValueRow(label, "--")
+        return
+    }
+    val above = currentPrice?.let { it >= average }
+    val color = when (above) {
+        true -> BullGreen
+        false -> BearRed
+        null -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row {
+            Text(Formatters.price(average), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            if (above != null) {
+                Spacer(Modifier.size(6.dp))
+                Text(if (above) "Price above" else "Price below", style = MaterialTheme.typography.labelSmall, color = color)
+            }
+        }
+    }
+}
+
+@Composable
+private fun SwingRow(label: String, swing: SwingPoint, color: androidx.compose.ui.graphics.Color) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            "${Formatters.price(swing.price)} · ${swing.barsAgo}d ago",
+            style = MaterialTheme.typography.bodyMedium,
+            color = color,
+            fontWeight = FontWeight.Bold
+        )
     }
 }
 

@@ -122,7 +122,9 @@ data class StockReport(
     val score: ConvictionScore,
     val narrative: List<NewsItem>,
     val analystView: AnalystView,
-    val businessSummary: String?
+    val businessSummary: String?,
+    /** Null when there's too little price history to compute anything (e.g. a recent IPO). */
+    val technicals: TechnicalReading?
 )
 
 /** Lightweight row used on the watchlist screen without a full report fetch. */

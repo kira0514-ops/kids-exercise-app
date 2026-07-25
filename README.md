@@ -1,15 +1,21 @@
 # StockScope
 
 A native Android app (Kotlin + Jetpack Compose) that turns a ticker into the same
-kind of report the `stock-analyzer` skill produces: fundamentals, a sector peer
-comparison, bear/base/bull/stretched-bull price targets, and a 100-point
-conviction score.
+kind of report the `stock-analyzer` skill produces: fundamentals, technical
+readings, a sector peer comparison, bear/base/bull/stretched-bull price targets,
+and a 100-point conviction score.
 
 ## What it does
 
 1. **Add a ticker** to your watchlist. Each row shows live price, day change,
    and conviction score.
 2. **Tap a ticker** to open the full report:
+   - **Chart** — TradingView's free embedded Advanced Chart widget.
+   - **Technicals** — RSI(14), MACD(12,26,9), ADX(14) with +DI/-DI, a slow
+     Stochastic(14,3,3), the SMA20/50/200 stack against the current price, and
+     the most recent confirmed swing high/low (a 3-bar fractal pivot). All
+     computed on-device from a year of daily OHLC bars pulled from Yahoo's
+     chart endpoint — nothing scraped from the chart widget itself.
    - **Fundamentals** — price, market cap, trailing/forward P/E, EPS, revenue
      growth, margins, cash vs. debt, free cash flow, dividend yield, beta,
      52-week range, 50D/200D moving averages.
@@ -48,7 +54,8 @@ missing field degrades gracefully instead of crashing.
   DataStore (Preferences) — no backend, no account.
 - **Scoring**: `ScoringEngine` (in `domain/`) is pure and unit-testable —
   it turns fundamentals into the conviction score and asymmetry targets with
-  no I/O.
+  no I/O. `TechnicalAnalysisEngine` is the same kind of pure, tested function:
+  daily candles in, RSI/MACD/ADX/Stochastic/moving averages/swing points out.
 
 ## Building
 

@@ -10,7 +10,9 @@ import com.kira.stockscope.data.network.YahooFinanceApi.Companion.SEARCH_URL
 import com.kira.stockscope.data.network.dto.QuoteSummaryResult
 import com.kira.stockscope.data.network.dto.RawFmt
 import com.kira.stockscope.domain.ScoringEngine
+import com.kira.stockscope.domain.TechnicalAnalysisEngine
 import com.kira.stockscope.model.AnalystView
+import com.kira.stockscope.model.Candle
 import com.kira.stockscope.model.Fundamentals
 import com.kira.stockscope.model.NewsItem
 import com.kira.stockscope.model.PeerRow
@@ -18,6 +20,7 @@ import com.kira.stockscope.model.QuickQuote
 import com.kira.stockscope.model.SectorComparison
 import com.kira.stockscope.model.StockReport
 import com.kira.stockscope.model.StockSnapshot
+import com.kira.stockscope.model.TechnicalReading
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -84,6 +87,7 @@ class StockRepository(
                 targetHigh = target.raw.financialData?.targetHighPrice.raw(),
                 targetLow = target.raw.financialData?.targetLowPrice.raw()
             )
+            val technicals = fetchTechnicals(ticker)
 
             StockReport(
                 snapshot = snapshot,
@@ -93,7 +97,8 @@ class StockRepository(
                 score = score,
                 narrative = narrative,
                 analystView = analystView,
-                businessSummary = target.raw.assetProfile?.longBusinessSummary
+                businessSummary = target.raw.assetProfile?.longBusinessSummary,
+                technicals = technicals
             )
         }
     }
@@ -151,6 +156,45 @@ class StockRepository(
         }
 
         return TargetFetch(snapshot, fundamentals, result)
+    }
+
+    /**
+     * A year of daily OHLC bars, used only to compute RSI/MACD/ADX/Stochastic/
+     * moving averages and the most recent swing high/low locally — Yahoo doesn't
+     * expose these as precomputed fields, so [TechnicalAnalysisEngine] derives
+     * them from raw candles. Best-effort: null on any failure or on too little
+     * history (e.g. a recent IPO), same as every other optional part of the report.
+     */
+    private suspend fun fetchTechnicals(ticker: String): TechnicalReading? {
+        val result = runCatching { api.getChart(CHART_URL + ticker, range = "1y") }.getOrNull()
+            ?.chart?.result?.firstOrNull() ?: return null
+        val timestamps = result.timestamp ?: return null
+        val quote = result.indicators?.quote?.firstOrNull() ?: return null
+        val opens = quote.open ?: return null
+        val highs = quote.high ?: return null
+        val lows = quote.low ?: return null
+        val closes = quote.close ?: return null
+
+        val candles = timestamps.indices.mapNotNull { i ->
+            val open = opens.getOrNull(i)
+            val high = highs.getOrNull(i)
+            val low = lows.getOrNull(i)
+            val close = closes.getOrNull(i)
+            if (open == null || high == null || low == null || close == null) {
+                null
+            } else {
+                Candle(
+                    timestamp = timestamps[i],
+                    open = open,
+                    high = high,
+                    low = low,
+                    close = close,
+                    volume = quote.volume?.getOrNull(i)
+                )
+            }
+        }
+
+        return TechnicalAnalysisEngine.analyze(candles)
     }
 
     private suspend fun resolvePeerSymbols(ticker: String, sector: String?, crumb: String?): List<String> {

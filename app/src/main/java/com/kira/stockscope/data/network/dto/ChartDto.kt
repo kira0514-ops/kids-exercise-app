@@ -49,6 +49,9 @@ data class ChartIndicators(
 
 @Serializable
 data class ChartQuote(
+    val open: List<Double?>? = null,
+    val high: List<Double?>? = null,
+    val low: List<Double?>? = null,
     val close: List<Double?>? = null,
     val volume: List<Long?>? = null
 )
