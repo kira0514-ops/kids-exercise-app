@@ -5,9 +5,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -29,6 +29,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -52,6 +53,7 @@ fun WatchlistScreen(
     onOpenSymbol: (String) -> Unit
 ) {
     val state by viewModel.uiState.collectAsState()
+    val addError by viewModel.addError.collectAsState()
     var query by remember { mutableStateOf("") }
 
     Scaffold(
@@ -68,15 +70,24 @@ fun WatchlistScreen(
     ) { padding ->
         Column(modifier = Modifier.padding(padding).fillMaxSize()) {
             Row(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 OutlinedTextField(
                     value = query,
-                    onValueChange = { query = it.uppercase() },
+                    onValueChange = {
+                        query = it.uppercase()
+                        if (addError != null) viewModel.clearAddError()
+                    },
                     modifier = Modifier.weight(1f),
                     singleLine = true,
-                    label = { Text("Add ticker (e.g. AAPL)") }
+                    isError = addError != null,
+                    label = { Text("Add ticker (e.g. AAPL)") },
+                    supportingText = {
+                        if (addError != null) {
+                            Text(addError!!, color = MaterialTheme.colorScheme.error)
+                        }
+                    }
                 )
                 Spacer(Modifier.size(8.dp))
                 IconButton(onClick = {
@@ -89,25 +100,31 @@ fun WatchlistScreen(
                 }
             }
 
-            if (state.rows.isEmpty()) {
-                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                    Text(
-                        "Add a ticker to build your watchlist.",
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(state.rows, key = { rowKey(it) }) { row ->
-                        WatchlistRowCard(
-                            row = row,
-                            onClick = { onOpenSymbol(rowKey(row)) },
-                            onRemove = { viewModel.removeSymbol(rowKey(row)) }
+            PullToRefreshBox(
+                isRefreshing = state.isRefreshing,
+                onRefresh = { viewModel.refreshAll() },
+                modifier = Modifier.weight(1f).fillMaxWidth()
+            ) {
+                if (state.rows.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text(
+                            "Add a ticker to build your watchlist.",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
+                    }
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(state.rows, key = { it.symbol() }) { row ->
+                            WatchlistRowCard(
+                                row = row,
+                                onClick = { onOpenSymbol(row.symbol()) },
+                                onRemove = { viewModel.removeSymbol(row.symbol()) }
+                            )
+                        }
                     }
                 }
             }
@@ -120,12 +137,6 @@ fun WatchlistScreen(
             )
         }
     }
-}
-
-private fun rowKey(row: RowState): String = when (row) {
-    is RowState.Loading -> row.symbol
-    is RowState.Loaded -> row.symbol
-    is RowState.Failed -> row.symbol
 }
 
 @Composable

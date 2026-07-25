@@ -4,6 +4,7 @@ import kotlinx.serialization.json.Json
 import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.HttpUrl
+import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -52,6 +53,29 @@ object NetworkModule {
         level = HttpLoggingInterceptor.Level.BASIC
     }
 
+    /**
+     * Yahoo's unofficial endpoints will 429 under moderate load. Retry those (and
+     * transient 5xx) a couple of times with exponential backoff before giving up;
+     * anything else is returned as-is for the repository to handle.
+     */
+    private val retryInterceptor = Interceptor { chain ->
+        val request = chain.request()
+        var response = chain.proceed(request)
+        var attempt = 0
+        while (!response.isSuccessful && isRetryable(response.code) && attempt < MAX_RETRIES) {
+            response.close()
+            Thread.sleep(INITIAL_BACKOFF_MS shl attempt)
+            attempt++
+            response = chain.proceed(request)
+        }
+        response
+    }
+
+    private fun isRetryable(code: Int) = code == 429 || code in 500..599
+
+    private const val MAX_RETRIES = 2
+    private const val INITIAL_BACKOFF_MS = 500L
+
     val okHttpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
             .cookieJar(inMemoryCookieJar)
@@ -62,6 +86,7 @@ object NetworkModule {
                     .build()
                 chain.proceed(request)
             }
+            .addInterceptor(retryInterceptor)
             .addInterceptor(loggingInterceptor)
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(15, TimeUnit.SECONDS)
