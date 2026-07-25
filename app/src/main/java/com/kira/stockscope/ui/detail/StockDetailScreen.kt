@@ -41,14 +41,17 @@ import androidx.compose.ui.unit.dp
 import com.kira.stockscope.R
 import com.kira.stockscope.model.AnalystView
 import com.kira.stockscope.model.AsymmetryTargets
+import com.kira.stockscope.model.ConfirmationStatus
 import com.kira.stockscope.model.ConvictionScore
 import com.kira.stockscope.model.Fundamentals
-import com.kira.stockscope.model.NewsItem
 import com.kira.stockscope.model.MacdReading
+import com.kira.stockscope.model.NewsItem
 import com.kira.stockscope.model.SectorComparison
 import com.kira.stockscope.model.StockReport
-import com.kira.stockscope.model.SwingPoint
+import com.kira.stockscope.model.SwingSeries
 import com.kira.stockscope.model.TechnicalReading
+import com.kira.stockscope.model.TrendConfirmation
+import com.kira.stockscope.model.TrendDirection
 import com.kira.stockscope.ui.common.Formatters
 import com.kira.stockscope.ui.theme.BearRed
 import com.kira.stockscope.ui.theme.BullGreen
@@ -170,6 +173,11 @@ private fun TechnicalsSection(technicals: TechnicalReading?, currentPrice: Doubl
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         } else {
+            TrendConfirmationBanner(technicals.trendConfirmation)
+            Spacer(Modifier.size(12.dp))
+            HorizontalDivider()
+            Spacer(Modifier.size(8.dp))
+
             Text("Momentum", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
             RsiRow(technicals.rsi14)
             StochasticRow(technicals.stochK, technicals.stochD)
@@ -191,15 +199,83 @@ private fun TechnicalsSection(technicals: TechnicalReading?, currentPrice: Doubl
             MovingAverageRow("SMA 50", technicals.sma50, currentPrice)
             MovingAverageRow("SMA 200", technicals.sma200, currentPrice)
 
-            if (technicals.swingHigh != null || technicals.swingLow != null) {
-                Spacer(Modifier.size(10.dp))
-                HorizontalDivider()
-                Spacer(Modifier.size(8.dp))
-                Text("Swing levels", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
-                technicals.swingHigh?.let { SwingRow("Swing high", it, BullGreen) }
-                technicals.swingLow?.let { SwingRow("Swing low", it, BearRed) }
-            }
+            Spacer(Modifier.size(10.dp))
+            HorizontalDivider()
+            Spacer(Modifier.size(8.dp))
+
+            Text("Swing structure", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+            SwingSeriesRow("Daily (minor, 3-bar)", technicals.dailySwings, unit = "d")
+            SwingSeriesRow("Daily (major, 8-bar)", technicals.majorDailySwings, unit = "d")
+            SwingSeriesRow("Weekly", technicals.weeklySwings, unit = "w")
         }
+    }
+}
+
+@Composable
+private fun TrendConfirmationBanner(confirmation: TrendConfirmation) {
+    val (label, color) = when (confirmation.status) {
+        ConfirmationStatus.CONFIRMED_UP -> "Uptrend confirmed" to BullGreen
+        ConfirmationStatus.CONFIRMED_DOWN -> "Downtrend confirmed" to BearRed
+        ConfirmationStatus.MIXED -> "Mixed signals" to NeutralAmber
+        ConfirmationStatus.INSUFFICIENT_DATA -> "Not enough data to confirm a trend" to MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    val indicatorText = if (confirmation.totalSignals > 0) {
+        "${confirmation.bullishSignals}/${confirmation.totalSignals} bullish"
+    } else {
+        "not enough data"
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(color.copy(alpha = 0.12f), RoundedCornerShape(10.dp))
+            .padding(12.dp)
+    ) {
+        Text(label, color = color, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+        Spacer(Modifier.size(4.dp))
+        Text(
+            "Swing structure: ${trendDirectionLabel(confirmation.swingVerdict)} · Indicators: $indicatorText",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+private fun trendDirectionLabel(direction: TrendDirection): String = when (direction) {
+    TrendDirection.UP -> "higher highs & higher lows"
+    TrendDirection.DOWN -> "lower highs & lower lows"
+    TrendDirection.MIXED -> "mixed"
+    TrendDirection.UNKNOWN -> "not enough data"
+}
+
+@Composable
+private fun SwingSeriesRow(label: String, series: SwingSeries, unit: String) {
+    val latestHigh = series.highs.firstOrNull()
+    val latestLow = series.lows.firstOrNull()
+    if (latestHigh == null && latestLow == null) {
+        KeyValueRow(label, "Not enough data")
+        return
+    }
+    val (trendLabel, trendColor) = when (series.structureTrend) {
+        TrendDirection.UP -> "Higher highs/lows" to BullGreen
+        TrendDirection.DOWN -> "Lower highs/lows" to BearRed
+        TrendDirection.MIXED -> "Mixed" to NeutralAmber
+        TrendDirection.UNKNOWN -> "--" to MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(trendLabel, style = MaterialTheme.typography.bodySmall, color = trendColor, fontWeight = FontWeight.Bold)
+        }
+        Text(
+            latestHigh?.let { "High ${Formatters.price(it.price)} (${it.barsAgo}$unit ago)" } ?: "High --",
+            style = MaterialTheme.typography.labelSmall,
+            color = BullGreen
+        )
+        Text(
+            latestLow?.let { "Low ${Formatters.price(it.price)} (${it.barsAgo}$unit ago)" } ?: "Low --",
+            style = MaterialTheme.typography.labelSmall,
+            color = BearRed
+        )
     }
 }
 
@@ -341,22 +417,6 @@ private fun MovingAverageRow(label: String, average: Double?, currentPrice: Doub
                 Text(if (above) "Price above" else "Price below", style = MaterialTheme.typography.labelSmall, color = color)
             }
         }
-    }
-}
-
-@Composable
-private fun SwingRow(label: String, swing: SwingPoint, color: androidx.compose.ui.graphics.Color) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(
-            "${Formatters.price(swing.price)} · ${swing.barsAgo}d ago",
-            style = MaterialTheme.typography.bodyMedium,
-            color = color,
-            fontWeight = FontWeight.Bold
-        )
     }
 }
 

@@ -1,6 +1,8 @@
 package com.kira.stockscope.domain
 
 import com.kira.stockscope.model.Candle
+import com.kira.stockscope.model.ConfirmationStatus
+import com.kira.stockscope.model.TrendDirection
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -22,6 +24,29 @@ class TechnicalAnalysisEngineTest {
 
     private fun linearSeries(count: Int, start: Double = 1.0, step: Double = 1.0): List<Double> =
         (0 until count).map { start + it * step }
+
+    /**
+     * An 8-bar-cycle zigzag: 5 up days then 3 down days, repeated. Net drift is
+     * +2 per cycle, so — by construction, not by measurement — every cycle's
+     * peak and trough is strictly higher than the previous cycle's, and each
+     * turning point sits exactly 3 bars from the next leg's turning point,
+     * matching the 3-bar fractal width precisely.
+     */
+    private fun zigzagCloses(cycles: Int, start: Double = 100.0, up: Double = 5.0, down: Double = 3.0): List<Double> {
+        val result = mutableListOf<Double>()
+        var level = start
+        repeat(cycles) {
+            for (step in 1..up.toInt()) {
+                level += 1.0
+                result.add(level)
+            }
+            for (step in 1..down.toInt()) {
+                level -= 1.0
+                result.add(level)
+            }
+        }
+        return result
+    }
 
     // --- guard rails ---
 
@@ -48,9 +73,12 @@ class TechnicalAnalysisEngineTest {
         assertNull("ADX needs 29 bars", reading.adx14)
 
         // A strictly monotonic series has no interior point whose neighbors are
-        // more extreme on both sides, so it should never report a fractal pivot.
-        assertNull(reading.swingHigh)
-        assertNull(reading.swingLow)
+        // more extreme on both sides, so no timeframe should report a pivot.
+        assertTrue(reading.dailySwings.highs.isEmpty())
+        assertTrue(reading.dailySwings.lows.isEmpty())
+        assertTrue(reading.majorDailySwings.highs.isEmpty())
+        assertTrue(reading.weeklySwings.highs.isEmpty())
+        assertEquals(TrendDirection.UNKNOWN, reading.dailySwings.structureTrend)
     }
 
     // --- RSI ---
@@ -141,7 +169,7 @@ class TechnicalAnalysisEngineTest {
         assertTrue(reading.stochD!! > 90.0)
     }
 
-    // --- swing high / low ---
+    // --- daily minor swing high / low ---
 
     @Test
     fun `swing high is found at a confirmed local peak`() {
@@ -151,7 +179,7 @@ class TechnicalAnalysisEngineTest {
         val candles = candlesFromCloses(closes)
 
         val reading = requireNotNull(TechnicalAnalysisEngine.analyze(candles))
-        val swingHigh = requireNotNull(reading.swingHigh)
+        val swingHigh = requireNotNull(reading.dailySwings.highs.firstOrNull())
 
         assertEquals(20.5, swingHigh.price, 0.0001) // stored as the bar's high, not its close
         assertEquals(candles.size - 1 - 10, swingHigh.barsAgo)
@@ -165,7 +193,7 @@ class TechnicalAnalysisEngineTest {
         val candles = candlesFromCloses(closes)
 
         val reading = requireNotNull(TechnicalAnalysisEngine.analyze(candles))
-        val swingLow = requireNotNull(reading.swingLow)
+        val swingLow = requireNotNull(reading.dailySwings.lows.firstOrNull())
 
         assertEquals(-5.5, swingLow.price, 0.0001) // stored as the bar's low, not its close
         assertEquals(candles.size - 1 - 10, swingLow.barsAgo)
@@ -179,6 +207,74 @@ class TechnicalAnalysisEngineTest {
         val closes = linearSeries(10) + listOf(20.0) + listOf(9.0, 8.0)
         val candles = candlesFromCloses(closes)
         val reading = requireNotNull(TechnicalAnalysisEngine.analyze(candles))
-        assertNull(reading.swingHigh)
+        assertTrue(reading.dailySwings.highs.isEmpty())
+    }
+
+    // --- swing structure / trend confirmation ---
+
+    @Test
+    fun `a rising zigzag reads as higher-highs-and-higher-lows on the daily minor swing series`() {
+        val closes = zigzagCloses(cycles = 6)
+        val candles = candlesFromCloses(closes)
+        val reading = requireNotNull(TechnicalAnalysisEngine.analyze(candles))
+
+        assertEquals(TrendDirection.UP, reading.dailySwings.structureTrend)
+        assertEquals(TrendDirection.UP, reading.trendConfirmation.swingVerdict)
+    }
+
+    @Test
+    fun `a falling zigzag reads as lower-highs-and-lower-lows on the daily minor swing series`() {
+        // Mirror of the rising zigzag: 3 up days then 5 down days per cycle, for a
+        // net -2 per cycle — each peak and trough is already strictly lower than
+        // the previous cycle's by construction, no extra flipping needed.
+        val closes = zigzagCloses(cycles = 6, up = 3.0, down = 5.0)
+        val candles = candlesFromCloses(closes)
+        val reading = requireNotNull(TechnicalAnalysisEngine.analyze(candles))
+
+        assertEquals(TrendDirection.DOWN, reading.dailySwings.structureTrend)
+        assertEquals(TrendDirection.DOWN, reading.trendConfirmation.swingVerdict)
+    }
+
+    @Test
+    fun `a monotonic uptrend has confidently bullish indicators but unconfirmed swing structure, so overall status is mixed`() {
+        // Every indicator signal is bullish here (RSI 100, MACD positive, ADX with
+        // +DI dominant, price above its own moving averages — all shown precisely
+        // in the other tests above), but a strictly monotonic series has no
+        // fractal pivot at any width or timeframe, so there's no swing evidence to
+        // confirm the trend with — the result should be "mixed", not "confirmed".
+        val candles = candlesFromCloses(linearSeries(60))
+        val reading = requireNotNull(TechnicalAnalysisEngine.analyze(candles))
+
+        assertEquals(TrendDirection.UNKNOWN, reading.trendConfirmation.swingVerdict)
+        assertEquals(TrendDirection.UP, reading.trendConfirmation.indicatorVerdict)
+        assertEquals(ConfirmationStatus.MIXED, reading.trendConfirmation.status)
+    }
+
+    @Test
+    fun `insufficient data on every front reports INSUFFICIENT_DATA, not a guess`() {
+        // Only 3 bars: RSI/MACD/ADX/Stochastic/SMA/swings are all null or empty.
+        val candles = candlesFromCloses(linearSeries(3))
+        val reading = requireNotNull(TechnicalAnalysisEngine.analyze(candles))
+
+        assertEquals(TrendDirection.UNKNOWN, reading.trendConfirmation.swingVerdict)
+        assertEquals(TrendDirection.UNKNOWN, reading.trendConfirmation.indicatorVerdict)
+        assertEquals(ConfirmationStatus.INSUFFICIENT_DATA, reading.trendConfirmation.status)
+    }
+
+    // --- weekly resampling ---
+
+    @Test
+    fun `a large enough spike is still found as a swing on the weekly-resampled series`() {
+        // A slow ~7-week rise, a spike far larger than any single week's normal
+        // range, then a slow ~7-week fall. Whichever calendar week the spike lands
+        // in, that week's high is far above its neighbors' — regardless of exactly
+        // where week boundaries fall relative to the data — so it should surface
+        // as a confirmed weekly swing high.
+        val closes = linearSeries(50) + listOf(500.0) + linearSeries(49, start = 49.0, step = -1.0)
+        val candles = candlesFromCloses(closes)
+        val reading = requireNotNull(TechnicalAnalysisEngine.analyze(candles))
+
+        val weeklyHigh = requireNotNull(reading.weeklySwings.highs.firstOrNull())
+        assertTrue(weeklyHigh.price > 400.0)
     }
 }

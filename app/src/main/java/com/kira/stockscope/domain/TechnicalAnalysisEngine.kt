@@ -1,18 +1,22 @@
 package com.kira.stockscope.domain
 
 import com.kira.stockscope.model.Candle
+import com.kira.stockscope.model.ConfirmationStatus
 import com.kira.stockscope.model.MacdReading
 import com.kira.stockscope.model.SwingPoint
+import com.kira.stockscope.model.SwingSeries
 import com.kira.stockscope.model.TechnicalReading
+import com.kira.stockscope.model.TrendConfirmation
+import com.kira.stockscope.model.TrendDirection
 import kotlin.math.abs
 
 /**
  * Computes standard technical readings from daily OHLC candles: Wilder's RSI(14),
  * MACD(12,26,9), Wilder's ADX(14) with +DI/-DI, a slow Stochastic(14,3,3), simple
- * moving averages, and the most recent confirmed swing high/low (a 3-bar fractal:
- * a bar whose high/low is more extreme than the 3 bars on each side of it). Every
- * reading is independently nullable — with less history than an indicator needs it
- * simply doesn't report a value rather than guessing.
+ * moving averages, swing structure across three timeframes/widths (daily minor,
+ * daily major, weekly), and a trend confirmation verdict that combines them.
+ * Every reading is independently nullable/empty — with less history than an
+ * indicator needs it simply doesn't report a value rather than guessing.
  */
 object TechnicalAnalysisEngine {
 
@@ -23,7 +27,16 @@ object TechnicalAnalysisEngine {
     private const val ADX_PERIOD = 14
     private const val STOCH_PERIOD = 14
     private const val STOCH_SMOOTH = 3
-    private const val SWING_FRACTAL_WIDTH = 3
+    private const val ADX_TREND_THRESHOLD = 20.0
+
+    /** Short-term pivots: a bar more extreme than the 3 bars on each side of it. */
+    private const val MINOR_FRACTAL_WIDTH = 3
+
+    /** The wider pivots a swing trader would mark, still on daily bars. */
+    private const val MAJOR_FRACTAL_WIDTH = 8
+
+    private const val SWING_HISTORY_COUNT = 3
+    private const val SECONDS_PER_DAY = 86_400L
 
     fun analyze(candles: List<Candle>): TechnicalReading? {
         if (candles.size < 2) return null
@@ -34,21 +47,44 @@ object TechnicalAnalysisEngine {
 
         val adxResult = computeAdx(highs, lows, closes, ADX_PERIOD)
         val stochResult = computeStochastic(highs, lows, closes, STOCH_PERIOD, STOCH_SMOOTH)
+        val rsi = computeRsi(closes, RSI_PERIOD)
+        val macd = computeMacd(closes)
+        val sma20 = sma(closes, 20)
+        val sma50 = sma(closes, 50)
+        val sma200 = sma(closes, 200)
+        val lastClose = closes.last()
+
+        val dailyMinorSwings = buildSwingSeries(sorted, MINOR_FRACTAL_WIDTH)
+        val dailyMajorSwings = buildSwingSeries(sorted, MAJOR_FRACTAL_WIDTH)
+        val weeklySwings = buildSwingSeries(resampleToWeekly(sorted), MINOR_FRACTAL_WIDTH)
+
+        val trendConfirmation = computeTrendConfirmation(
+            swingSeriesList = listOf(dailyMinorSwings, dailyMajorSwings, weeklySwings),
+            rsi = rsi,
+            macd = macd,
+            adx = adxResult?.adx,
+            plusDi = adxResult?.plusDi,
+            minusDi = adxResult?.minusDi,
+            lastClose = lastClose,
+            movingAverages = listOfNotNull(sma20, sma50, sma200)
+        )
 
         return TechnicalReading(
-            lastClose = closes.last(),
-            rsi14 = computeRsi(closes, RSI_PERIOD),
-            macd = computeMacd(closes),
+            lastClose = lastClose,
+            rsi14 = rsi,
+            macd = macd,
             adx14 = adxResult?.adx,
             plusDi14 = adxResult?.plusDi,
             minusDi14 = adxResult?.minusDi,
             stochK = stochResult?.k,
             stochD = stochResult?.d,
-            sma20 = sma(closes, 20),
-            sma50 = sma(closes, 50),
-            sma200 = sma(closes, 200),
-            swingHigh = findSwingHigh(sorted),
-            swingLow = findSwingLow(sorted)
+            sma20 = sma20,
+            sma50 = sma50,
+            sma200 = sma200,
+            dailySwings = dailyMinorSwings,
+            majorDailySwings = dailyMajorSwings,
+            weeklySwings = weeklySwings,
+            trendConfirmation = trendConfirmation
         )
     }
 
@@ -205,30 +241,130 @@ object TechnicalAnalysisEngine {
         return StochResult(k = slowK.last(), d = slowD)
     }
 
-    private fun findSwingHigh(candles: List<Candle>): SwingPoint? {
-        val index = findSwingIndex(candles) { candidate, other -> other.high < candidate.high } ?: return null
-        val candle = candles[index]
-        return SwingPoint(candle.high, candle.timestamp, candles.size - 1 - index)
+    private fun buildSwingSeries(candles: List<Candle>, fractalWidth: Int): SwingSeries {
+        val highIndices = findSwingIndices(candles, fractalWidth) { candidate, other -> other.high < candidate.high }
+        val lowIndices = findSwingIndices(candles, fractalWidth) { candidate, other -> other.low > candidate.low }
+        val highs = highIndices.map { i -> SwingPoint(candles[i].high, candles[i].timestamp, candles.size - 1 - i) }
+        val lows = lowIndices.map { i -> SwingPoint(candles[i].low, candles[i].timestamp, candles.size - 1 - i) }
+        return SwingSeries(highs, lows)
     }
 
-    private fun findSwingLow(candles: List<Candle>): SwingPoint? {
-        val index = findSwingIndex(candles) { candidate, other -> other.low > candidate.low } ?: return null
-        val candle = candles[index]
-        return SwingPoint(candle.low, candle.timestamp, candles.size - 1 - index)
-    }
-
-    /** Scans backward from the most recent confirmable bar for the nearest fractal pivot's index. */
-    private inline fun findSwingIndex(candles: List<Candle>, isMoreExtreme: (candidate: Candle, other: Candle) -> Boolean): Int? {
+    /**
+     * Scans backward from the most recent confirmable bar, collecting the indices
+     * of up to [SWING_HISTORY_COUNT] fractal pivots, most-recent first. A pivot at
+     * index i needs [fractalWidth] bars on each side that are all less extreme —
+     * i.e. it can't be confirmed until [fractalWidth] bars have closed after it.
+     */
+    private inline fun findSwingIndices(
+        candles: List<Candle>,
+        fractalWidth: Int,
+        isMoreExtreme: (candidate: Candle, other: Candle) -> Boolean
+    ): List<Int> {
         val n = candles.size
-        val lastConfirmable = n - 1 - SWING_FRACTAL_WIDTH
-        if (lastConfirmable < SWING_FRACTAL_WIDTH) return null
+        val lastConfirmable = n - 1 - fractalWidth
+        if (lastConfirmable < fractalWidth) return emptyList()
 
-        for (i in lastConfirmable downTo SWING_FRACTAL_WIDTH) {
+        val result = mutableListOf<Int>()
+        for (i in lastConfirmable downTo fractalWidth) {
+            if (result.size >= SWING_HISTORY_COUNT) break
             val candidate = candles[i]
-            val isPivot = (i - SWING_FRACTAL_WIDTH until i).all { isMoreExtreme(candidate, candles[it]) } &&
-                (i + 1..i + SWING_FRACTAL_WIDTH).all { isMoreExtreme(candidate, candles[it]) }
-            if (isPivot) return i
+            val isPivot = (i - fractalWidth until i).all { isMoreExtreme(candidate, candles[it]) } &&
+                (i + 1..i + fractalWidth).all { isMoreExtreme(candidate, candles[it]) }
+            if (isPivot) result.add(i)
         }
-        return null
+        return result
+    }
+
+    /**
+     * Aggregates daily bars into calendar weeks (Monday start): open = the week's
+     * first bar's open, high/low = the week's extremes, close = the week's last
+     * bar's close, volume = summed. Used to run the same fractal pivot detection
+     * on a higher timeframe instead of just widening the daily lookback.
+     */
+    private fun resampleToWeekly(daily: List<Candle>): List<Candle> {
+        if (daily.isEmpty()) return emptyList()
+        return daily.groupBy { weekStartEpochDay(it.timestamp / SECONDS_PER_DAY) }
+            .toSortedMap()
+            .map { (weekStartDay, bars) ->
+                val sortedBars = bars.sortedBy { it.timestamp }
+                Candle(
+                    timestamp = weekStartDay * SECONDS_PER_DAY,
+                    open = sortedBars.first().open,
+                    high = sortedBars.maxOf { it.high },
+                    low = sortedBars.minOf { it.low },
+                    close = sortedBars.last().close,
+                    volume = sortedBars.mapNotNull { it.volume }.takeIf { it.isNotEmpty() }?.sum()
+                )
+            }
+    }
+
+    /** Jan 1 1970 (epoch day 0) was a Thursday, i.e. weekday index 3 in a Monday=0 scheme. */
+    private fun weekStartEpochDay(epochDay: Long): Long {
+        val weekday = ((epochDay + 3) % 7 + 7) % 7
+        return epochDay - weekday
+    }
+
+    private fun computeTrendConfirmation(
+        swingSeriesList: List<SwingSeries>,
+        rsi: Double?,
+        macd: MacdReading?,
+        adx: Double?,
+        plusDi: Double?,
+        minusDi: Double?,
+        lastClose: Double,
+        movingAverages: List<Double>
+    ): TrendConfirmation {
+        val swingTrends = swingSeriesList.map { it.structureTrend }.filter { it != TrendDirection.UNKNOWN }
+        val swingUpVotes = swingTrends.count { it == TrendDirection.UP }
+        val swingDownVotes = swingTrends.count { it == TrendDirection.DOWN }
+        val swingVerdict = when {
+            swingTrends.isEmpty() -> TrendDirection.UNKNOWN
+            swingUpVotes > swingDownVotes -> TrendDirection.UP
+            swingDownVotes > swingUpVotes -> TrendDirection.DOWN
+            else -> TrendDirection.MIXED
+        }
+
+        var bullish = 0
+        var bearish = 0
+
+        if (rsi != null) {
+            if (rsi > 50) bullish++ else if (rsi < 50) bearish++
+        }
+        if (macd != null) {
+            if (macd.histogram > 0) bullish++ else if (macd.histogram < 0) bearish++
+        }
+        if (adx != null && adx >= ADX_TREND_THRESHOLD && plusDi != null && minusDi != null) {
+            if (plusDi > minusDi) bullish++ else if (minusDi > plusDi) bearish++
+        }
+        if (movingAverages.isNotEmpty()) {
+            val above = movingAverages.count { lastClose >= it }
+            val below = movingAverages.size - above
+            if (above > below) bullish++ else if (below > above) bearish++
+        }
+
+        val totalSignals = bullish + bearish
+        val indicatorVerdict = when {
+            totalSignals == 0 -> TrendDirection.UNKNOWN
+            bullish > bearish -> TrendDirection.UP
+            bearish > bullish -> TrendDirection.DOWN
+            else -> TrendDirection.MIXED
+        }
+
+        val status = when {
+            swingVerdict == TrendDirection.UNKNOWN && indicatorVerdict == TrendDirection.UNKNOWN ->
+                ConfirmationStatus.INSUFFICIENT_DATA
+            swingVerdict == TrendDirection.UP && indicatorVerdict == TrendDirection.UP -> ConfirmationStatus.CONFIRMED_UP
+            swingVerdict == TrendDirection.DOWN && indicatorVerdict == TrendDirection.DOWN -> ConfirmationStatus.CONFIRMED_DOWN
+            else -> ConfirmationStatus.MIXED
+        }
+
+        return TrendConfirmation(
+            status = status,
+            swingVerdict = swingVerdict,
+            indicatorVerdict = indicatorVerdict,
+            bullishSignals = bullish,
+            bearishSignals = bearish,
+            totalSignals = totalSignals
+        )
     }
 }

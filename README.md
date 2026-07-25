@@ -13,9 +13,14 @@ and a 100-point conviction score.
    - **Chart** — TradingView's free embedded Advanced Chart widget.
    - **Technicals** — RSI(14), MACD(12,26,9), ADX(14) with +DI/-DI, a slow
      Stochastic(14,3,3), the SMA20/50/200 stack against the current price, and
-     the most recent confirmed swing high/low (a 3-bar fractal pivot). All
-     computed on-device from a year of daily OHLC bars pulled from Yahoo's
-     chart endpoint — nothing scraped from the chart widget itself.
+     swing structure across three timeframes: daily minor (3-bar fractal),
+     daily major (8-bar), and weekly (3-bar on weekly-resampled bars). A
+     **trend confirmation** banner combines all of it — swing structure across
+     timeframes (higher-highs/higher-lows or the reverse) plus a majority vote
+     across the momentum indicators — into one verdict: confirmed up, confirmed
+     down, mixed, or not enough data. Everything is computed on-device from a
+     year of daily OHLC bars pulled from Yahoo's chart endpoint — nothing
+     scraped from the chart widget itself.
    - **Fundamentals** — price, market cap, trailing/forward P/E, EPS, revenue
      growth, margins, cash vs. debt, free cash flow, dividend yield, beta,
      52-week range, 50D/200D moving averages.
