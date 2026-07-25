@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">StockScope</string>
+    <string name="disclaimer">StockScope is an informational research tool, not financial advice. Data from Yahoo Finance may be delayed or incomplete. Verify before trading.</string>
+</resources>

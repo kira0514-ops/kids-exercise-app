@@ -1,0 +1,366 @@
+package com.kira.stockscope.ui.detail
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import com.kira.stockscope.R
+import com.kira.stockscope.model.AsymmetryTargets
+import com.kira.stockscope.model.ConvictionScore
+import com.kira.stockscope.model.Fundamentals
+import com.kira.stockscope.model.NewsItem
+import com.kira.stockscope.model.SectorComparison
+import com.kira.stockscope.model.StockReport
+import com.kira.stockscope.ui.common.Formatters
+import com.kira.stockscope.ui.theme.BearRed
+import com.kira.stockscope.ui.theme.BullGreen
+import com.kira.stockscope.ui.theme.NeutralAmber
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun StockDetailScreen(
+    viewModel: StockDetailViewModel,
+    onBack: () -> Unit
+) {
+    val state by viewModel.state.collectAsState()
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text(if (state is DetailUiState.Loaded) (state as DetailUiState.Loaded).report.snapshot.symbol else "StockScope") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                }
+            )
+        }
+    ) { padding ->
+        Box(modifier = Modifier.padding(padding).fillMaxSize()) {
+            when (val s = state) {
+                is DetailUiState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    CircularProgressIndicator()
+                }
+                is DetailUiState.Failed -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(s.message, color = BearRed)
+                        Spacer(Modifier.size(12.dp))
+                        Button(onClick = { viewModel.load() }) { Text("Retry") }
+                    }
+                }
+                is DetailUiState.Loaded -> ReportBody(s.report)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ReportBody(report: StockReport) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        HeaderSection(report)
+        ConvictionSection(report.score)
+        FundamentalsSection(report.fundamentals)
+        SectorSection(report.sector)
+        AsymmetrySection(report.asymmetry)
+        NarrativeSection(report.narrative, report.businessSummary)
+        Text(
+            stringResource(R.string.disclaimer),
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun SectionCard(title: String, content: @Composable () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.size(8.dp))
+            content()
+        }
+    }
+}
+
+@Composable
+private fun HeaderSection(report: StockReport) {
+    val snapshot = report.snapshot
+    Column {
+        Text("${snapshot.symbol} · ${snapshot.name}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        listOfNotNull(snapshot.sector, snapshot.industry).let {
+            if (it.isNotEmpty()) {
+                Text(it.joinToString(" · "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+        Spacer(Modifier.size(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(Formatters.price(snapshot.price, snapshot.currency), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.size(12.dp))
+            val changeColor = when {
+                snapshot.changePercent == null -> MaterialTheme.colorScheme.onSurfaceVariant
+                snapshot.changePercent >= 0 -> BullGreen
+                else -> BearRed
+            }
+            Text(Formatters.percent(snapshot.changePercent, alreadyPercentScale = true), color = changeColor, fontWeight = FontWeight.Bold)
+        }
+        Text("Market cap ${Formatters.compactNumber(snapshot.marketCap)}", style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun ConvictionSection(score: ConvictionScore) {
+    SectionCard(title = "Conviction score") {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("${score.total}", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
+            Text("/100", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Spacer(Modifier.size(12.dp))
+            TierBadge(score.total, score.tier)
+        }
+        Spacer(Modifier.size(12.dp))
+        ScoreBar("Valuation", score.valuationScore)
+        ScoreBar("Growth", score.growthScore)
+        ScoreBar("Quality / margins", score.qualityScore)
+        ScoreBar("Balance sheet", score.balanceSheetScore)
+    }
+}
+
+@Composable
+private fun TierBadge(total: Int, tier: String) {
+    val color = tierColor(total)
+    Box(
+        modifier = Modifier
+            .background(color.copy(alpha = 0.15f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp)
+    ) {
+        Text(tier, color = color, fontWeight = FontWeight.Bold)
+    }
+}
+
+private fun tierColor(total: Int) = when {
+    total >= 60 -> BullGreen
+    total >= 40 -> NeutralAmber
+    else -> BearRed
+}
+
+@Composable
+private fun ScoreBar(label: String, value: Int, max: Int = 25) {
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, style = MaterialTheme.typography.bodySmall)
+            Text("$value / $max", style = MaterialTheme.typography.bodySmall)
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(6.dp)
+                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(3.dp))
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(fraction = (value.toFloat() / max).coerceIn(0f, 1f))
+                    .height(6.dp)
+                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(3.dp))
+            )
+        }
+    }
+}
+
+@Composable
+private fun FundamentalsSection(f: Fundamentals) {
+    SectionCard(title = "Fundamentals") {
+        val rows = listOf(
+            "Trailing P/E" to Formatters.ratio(f.trailingPe),
+            "Forward P/E" to Formatters.ratio(f.forwardPe),
+            "Trailing EPS" to Formatters.price(f.trailingEps),
+            "Forward EPS" to Formatters.price(f.forwardEps),
+            "Revenue growth (YoY)" to Formatters.percent(f.revenueGrowth),
+            "Next-year growth est." to Formatters.percent(f.nextYearGrowthEstimate),
+            "Gross margin" to Formatters.percent(f.grossMargin),
+            "Operating margin" to Formatters.percent(f.operatingMargin),
+            "Profit margin" to Formatters.percent(f.profitMargin),
+            "Total cash" to Formatters.compactNumber(f.totalCash),
+            "Total debt" to Formatters.compactNumber(f.totalDebt),
+            "Net cash position" to Formatters.compactNumber(f.netCash),
+            "Free cash flow" to Formatters.compactNumber(f.freeCashFlow),
+            "Dividend yield" to Formatters.percent(f.dividendYield),
+            "Beta" to (f.beta?.let { "%.2f".format(it) } ?: "--"),
+            "52-week range" to "${Formatters.price(f.fiftyTwoWeekLow)} – ${Formatters.price(f.fiftyTwoWeekHigh)}",
+            "50D / 200D avg" to "${Formatters.price(f.fiftyDayAverage)} / ${Formatters.price(f.twoHundredDayAverage)}"
+        )
+        rows.forEach { (label, value) -> KeyValueRow(label, value) }
+    }
+}
+
+@Composable
+private fun KeyValueRow(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(value, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+    }
+}
+
+@Composable
+private fun SectorSection(sector: SectorComparison) {
+    SectionCard(title = "Sector comparison") {
+        val rankText = sector.targetRankByForwardPe?.let { rank ->
+            "Ranked #$rank of ${sector.totalRanked} by forward P/E (cheapest first)"
+        } ?: "Not enough peer data to rank"
+        Text(rankText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(Modifier.size(8.dp))
+        Row(modifier = Modifier.fillMaxWidth()) {
+            HeaderCell("Ticker", 1.4f)
+            HeaderCell("Fwd P/E", 1f)
+            HeaderCell("Margin", 1f)
+            HeaderCell("Growth", 1f)
+        }
+        HorizontalDivider()
+        sector.peers.forEach { peer ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(if (peer.isTarget) MaterialTheme.colorScheme.primary.copy(alpha = 0.08f) else androidx.compose.ui.graphics.Color.Transparent)
+                    .padding(vertical = 6.dp)
+            ) {
+                DataCell(peer.symbol, 1.4f, peer.isTarget)
+                DataCell(Formatters.ratio(peer.forwardPe), 1f, peer.isTarget)
+                DataCell(Formatters.percent(peer.profitMargin), 1f, peer.isTarget)
+                DataCell(Formatters.percent(peer.revenueGrowth), 1f, peer.isTarget)
+            }
+        }
+    }
+}
+
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.HeaderCell(text: String, weight: Float) {
+    Text(
+        text,
+        modifier = Modifier.weight(weight),
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        fontWeight = FontWeight.Bold
+    )
+}
+
+@Composable
+private fun androidx.compose.foundation.layout.RowScope.DataCell(text: String, weight: Float, emphasize: Boolean) {
+    Text(
+        text,
+        modifier = Modifier.weight(weight),
+        style = MaterialTheme.typography.bodySmall,
+        fontWeight = if (emphasize) FontWeight.Bold else FontWeight.Normal
+    )
+}
+
+@Composable
+private fun AsymmetrySection(a: AsymmetryTargets) {
+    SectionCard(title = "Asymmetry") {
+        Text(
+            "Scenario targets = anchor EPS × peer P/E multiple. Heuristic, not a forecast.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Spacer(Modifier.size(8.dp))
+        TargetRow("Bear", a.bear, a.currentPrice, BearRed)
+        TargetRow("Base", a.base, a.currentPrice, MaterialTheme.colorScheme.onSurface)
+        TargetRow("Bull", a.bull, a.currentPrice, BullGreen)
+        TargetRow("Stretched bull", a.stretchedBull, a.currentPrice, BullGreen)
+        Spacer(Modifier.size(12.dp))
+        HorizontalDivider()
+        Spacer(Modifier.size(8.dp))
+        KeyValueRow("Entry zone", Formatters.price(a.entryZone))
+        KeyValueRow("Trim zone", Formatters.price(a.trimZone))
+        KeyValueRow("Thesis-break level", Formatters.price(a.thesisBreak))
+    }
+}
+
+@Composable
+private fun TargetRow(label: String, target: Double?, current: Double?, color: androidx.compose.ui.graphics.Color) {
+    val upside = if (target != null && current != null && current != 0.0) (target / current - 1) * 100 else null
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, style = MaterialTheme.typography.bodyMedium)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(Formatters.price(target), fontWeight = FontWeight.Bold, color = color)
+            if (upside != null) {
+                Spacer(Modifier.size(6.dp))
+                Text("(${Formatters.percent(upside, alreadyPercentScale = true)})", style = MaterialTheme.typography.bodySmall, color = color)
+            }
+        }
+    }
+}
+
+@Composable
+private fun NarrativeSection(news: List<NewsItem>, businessSummary: String?) {
+    SectionCard(title = "Narrative") {
+        if (!businessSummary.isNullOrBlank()) {
+            Text(businessSummary, style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.size(12.dp))
+            HorizontalDivider()
+            Spacer(Modifier.size(8.dp))
+        }
+        if (news.isEmpty()) {
+            Text("No recent headlines found.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            val uriHandler = LocalUriHandler.current
+            news.forEach { item ->
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable(enabled = item.link != null) { item.link?.let { uriHandler.openUri(it) } }
+                        .padding(vertical = 6.dp)
+                ) {
+                    Text(item.title, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                    val meta = listOfNotNull(item.publisher, Formatters.timeAgo(item.publishedAtEpochSeconds)).joinToString(" · ")
+                    if (meta.isNotBlank()) {
+                        Text(meta, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            }
+        }
+    }
+}
