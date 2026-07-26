@@ -98,7 +98,8 @@ class StockRepository(
                 narrative = narrative,
                 analystView = analystView,
                 businessSummary = target.raw?.assetProfile?.longBusinessSummary,
-                technicals = technicals
+                technicals = technicals,
+                dataIssue = target.dataIssue
             )
         }
     }
@@ -134,7 +135,9 @@ class StockRepository(
         val snapshot: StockSnapshot,
         val fundamentals: Fundamentals,
         /** Null when quoteSummary itself failed but the chart endpoint still resolved a price. */
-        val raw: QuoteSummaryResult?
+        val raw: QuoteSummaryResult?,
+        /** Short reason quoteSummary degraded, surfaced in the UI so a failure mode can be reported instead of guessed at. */
+        val dataIssue: String? = null
     )
 
     /**
@@ -146,10 +149,17 @@ class StockRepository(
      * endpoint could resolve the ticker at all.
      */
     private suspend fun fetchTarget(ticker: String, crumb: String?): TargetFetch {
+        var dataIssue: String? = null
         val quoteSummaryResult = runCatching {
             api.getQuoteSummary(QUOTE_SUMMARY_URL + ticker, QUOTE_SUMMARY_MODULES, crumb)
                 .quoteSummary.result?.firstOrNull()
+        }.onFailure { e ->
+            dataIssue = "quoteSummary: ${e.javaClass.simpleName}: ${e.message}"
         }.getOrNull()
+
+        if (quoteSummaryResult == null && dataIssue == null) {
+            dataIssue = "quoteSummary: empty result (crumb=${if (crumb != null) "present" else "null"})"
+        }
 
         var snapshot = quoteSummaryResult?.let { mapSnapshot(ticker, it) }
         val fundamentals = quoteSummaryResult?.let { mapFundamentals(it) } ?: Fundamentals.EMPTY
@@ -179,7 +189,7 @@ class StockRepository(
         val finalSnapshot = snapshot
             ?: error("Couldn't reach Yahoo Finance for \"$ticker\" — check your connection and try again.")
 
-        return TargetFetch(finalSnapshot, fundamentals, quoteSummaryResult)
+        return TargetFetch(finalSnapshot, fundamentals, quoteSummaryResult, dataIssue)
     }
 
     /**

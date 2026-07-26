@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -108,6 +109,9 @@ private fun ReportBody(report: StockReport) {
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         HeaderSection(report)
+        if (report.dataIssue != null) {
+            DataIssueBanner(report.dataIssue)
+        }
         ChartSection(report.snapshot.symbol)
         TechnicalsSection(report.technicals, report.snapshot.price)
         ConvictionSection(report.score)
@@ -120,6 +124,39 @@ private fun ReportBody(report: StockReport) {
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+    }
+}
+
+/**
+ * Fundamentals/sector data comes from a different, crumb-gated Yahoo endpoint than
+ * price and chart data; that endpoint can fail on its own while everything else in
+ * the report still works. Shown as selectable text (like the crash dialog) so the
+ * actual reason can be copied and reported instead of guessed at from symptoms alone.
+ */
+@Composable
+private fun DataIssueBanner(reason: String) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = androidx.compose.material3.CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.errorContainer
+        )
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                "Fundamentals unavailable",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onErrorContainer
+            )
+            Spacer(Modifier.size(4.dp))
+            SelectionContainer {
+                Text(
+                    reason,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+            }
+        }
     }
 }
 

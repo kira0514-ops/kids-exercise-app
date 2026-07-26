@@ -136,7 +136,9 @@ data class StockReport(
     val analystView: AnalystView,
     val businessSummary: String?,
     /** Null when there's too little price history to compute anything (e.g. a recent IPO). */
-    val technicals: TechnicalReading?
+    val technicals: TechnicalReading?,
+    /** Short reason fundamentals/sector data is degraded, or null when quoteSummary succeeded. */
+    val dataIssue: String? = null
 )
 
 /** Lightweight row used on the watchlist screen without a full report fetch. */
