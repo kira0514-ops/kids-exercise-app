@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -67,6 +68,19 @@ fun TradingViewChartCard(symbol: String, darkTheme: Boolean) {
                             runCatching { context.startActivity(Intent(Intent.ACTION_VIEW, request.url)) }
                             return true
                         }
+
+                        override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                            // If the Chromium renderer process crashes (e.g. out of memory
+                            // rendering TradingView's JS-heavy widget) and this callback isn't
+                            // overridden, Android's default behavior is to kill the WHOLE APP
+                            // process — not a Kotlin/Java exception, so nothing in this app can
+                            // catch it. Returning true tells the system this has been handled;
+                            // per Android's own guidance the crashed WebView must not be used
+                            // again except to destroy it, which just leaves this card blank
+                            // instead of taking the rest of the screen down with it.
+                            runCatching { view.destroy() }
+                            return true
+                        }
                     }
                     loadDataWithBaseURL("https://s.tradingview.com", html, "text/html", "utf-8", null)
                     tag = html
@@ -76,11 +90,15 @@ fun TradingViewChartCard(symbol: String, darkTheme: Boolean) {
         update = { view ->
             val webView = view as? WebView ?: return@AndroidView
             if (webView.tag != html) {
-                webView.loadDataWithBaseURL("https://s.tradingview.com", html, "text/html", "utf-8", null)
-                webView.tag = html
+                // A render-process crash can leave this WebView destroyed but still
+                // attached; using a destroyed WebView throws, so this is best-effort.
+                runCatching {
+                    webView.loadDataWithBaseURL("https://s.tradingview.com", html, "text/html", "utf-8", null)
+                    webView.tag = html
+                }
             }
         },
-        onRelease = { (it as? WebView)?.destroy() }
+        onRelease = { view -> runCatching { (view as? WebView)?.destroy() } }
     )
 }
 
