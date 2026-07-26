@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Tank Duel — Artillery Game</title>
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div id="game-wrap">
+    <header id="hud">
+      <div class="hud-item">Turn <span id="turn-indicator">Player 1</span></div>
+      <div class="hud-item">Wind <span id="wind-indicator">0</span></div>
+      <div class="hud-item">Wins <span id="wins-indicator">0 - 0</span></div>
+      <button id="restart-btn" title="Start a new battle">New Battle</button>
+    </header>
+
+    <div id="weapon-bar">
+      <button class="weapon-btn" data-weapon="standard">Shell<br /><small>∞</small></button>
+      <button class="weapon-btn" data-weapon="heavy">Heavy Shell<br /><small id="ammo-heavy">3</small></button>
+      <button class="weapon-btn" data-weapon="rocket">Rocket<br /><small id="ammo-rocket">3</small></button>
+      <button class="weapon-btn" data-weapon="cluster">Cluster Bomb<br /><small id="ammo-cluster">2</small></button>
+    </div>
+
+    <div id="canvas-holder">
+      <canvas id="game" width="900" height="500"></canvas>
+
+      <div id="mode-select" class="overlay-layer">
+        <div class="overlay-card">
+          <h2>Tank Duel</h2>
+          <p>Drag from your tank to aim, release to fire. Choose your weapon, watch the wind, and blast the other tank first!</p>
+          <div class="mode-buttons">
+            <button id="mode-2p">2 Player (Hotseat)</button>
+            <button id="mode-ai">Vs Computer</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="overlay" class="overlay-layer hidden">
+        <div class="overlay-card">
+          <h2 id="overlay-title">Player 1 Wins!</h2>
+          <p id="overlay-msg"></p>
+          <button id="overlay-btn">Rematch</button>
+        </div>
+      </div>
+    </div>
+
+    <p id="hint">Drag from your tank to aim &amp; set power, release to fire. Pick a weapon above before you drag.</p>
+  </div>
+
+  <script src="js/game.js"></script>
+</body>
+</html>
