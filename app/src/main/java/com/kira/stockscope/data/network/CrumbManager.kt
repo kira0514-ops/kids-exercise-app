@@ -37,7 +37,9 @@ class CrumbManager(private val client: OkHttpClient) {
         val debug = StringBuilder()
 
         runCatching {
-            client.newCall(Request.Builder().url("https://fc.yahoo.com").build()).execute().use {
+            client.newCall(
+                Request.Builder().url("https://fc.yahoo.com").header("Accept", "*/*").build()
+            ).execute().use {
                 debug.append("fc_http=${it.code}")
             }
         }.onFailure { e ->
@@ -46,7 +48,13 @@ class CrumbManager(private val client: OkHttpClient) {
 
         runCatching {
             client.newCall(
-                Request.Builder().url("https://query2.finance.yahoo.com/v1/test/getcrumb").build()
+                // getcrumb returns a bare text/plain crumb, not JSON; explicitly overriding
+                // the shared client's default Accept: application/json here is what makes
+                // Yahoo actually return the crumb instead of a 406.
+                Request.Builder()
+                    .url("https://query2.finance.yahoo.com/v1/test/getcrumb")
+                    .header("Accept", "*/*")
+                    .build()
             ).execute()
         }.onFailure { e ->
             debug.append(" getcrumb_err=${e.javaClass.simpleName}:${e.message}")

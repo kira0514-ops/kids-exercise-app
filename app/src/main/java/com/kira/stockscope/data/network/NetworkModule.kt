@@ -85,14 +85,16 @@ object NetworkModule {
                 // Origin/Referer make these look like XHR calls from a finance.yahoo.com
                 // page (which is what they actually are, in a real browser) rather than
                 // a bare server-to-server request — Yahoo's edge is known to be pickier
-                // about the latter.
-                val request = chain.request().newBuilder()
-                    .header("User-Agent", USER_AGENT)
-                    .header("Accept", "application/json")
-                    .header("Origin", "https://finance.yahoo.com")
-                    .header("Referer", "https://finance.yahoo.com/")
-                    .build()
-                chain.proceed(request)
+                // about the latter. Only fills in headers the request doesn't already set:
+                // CrumbManager's getcrumb call returns plain text, not JSON, and forcing
+                // Accept: application/json on it made Yahoo reject it with 406.
+                val original = chain.request()
+                val builder = original.newBuilder()
+                if (original.header("User-Agent") == null) builder.header("User-Agent", USER_AGENT)
+                if (original.header("Accept") == null) builder.header("Accept", "application/json")
+                if (original.header("Origin") == null) builder.header("Origin", "https://finance.yahoo.com")
+                if (original.header("Referer") == null) builder.header("Referer", "https://finance.yahoo.com/")
+                chain.proceed(builder.build())
             }
             .addInterceptor(retryInterceptor)
             .addInterceptor(loggingInterceptor)
