@@ -155,7 +155,7 @@ class StockRepository(
             api.getQuoteSummary(QUOTE_SUMMARY_URL + ticker, QUOTE_SUMMARY_MODULES, crumb)
                 .quoteSummary.result?.firstOrNull()
         }.onFailure { e ->
-            val crumbState = if (crumb != null) "present" else "null"
+            val crumbState = if (crumb != null) "present" else "null: ${crumbManager.lastAttemptDebug}"
             dataIssue = if (e is HttpException) {
                 // Yahoo's error body usually names the actual rejection reason (e.g.
                 // "Invalid Crumb"), which is more useful here than the bare status code.
@@ -168,7 +168,8 @@ class StockRepository(
         }.getOrNull()
 
         if (quoteSummaryResult == null && dataIssue == null) {
-            dataIssue = "quoteSummary: empty result (crumb=${if (crumb != null) "present" else "null"})"
+            val crumbState = if (crumb != null) "present" else "null: ${crumbManager.lastAttemptDebug}"
+            dataIssue = "quoteSummary: empty result (crumb=$crumbState)"
         }
 
         var snapshot = quoteSummaryResult?.let { mapSnapshot(ticker, it) }

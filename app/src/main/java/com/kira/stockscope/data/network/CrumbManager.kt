@@ -22,6 +22,10 @@ class CrumbManager(private val client: OkHttpClient) {
     private val mutex = Mutex()
     private var cachedCrumb: String? = null
 
+    /** What happened on the most recent exchange attempt, surfaced by callers when [getCrumb] returns null. */
+    var lastAttemptDebug: String? = null
+        private set
+
     suspend fun getCrumb(): String? = mutex.withLock {
         if (cachedCrumb == null) {
             primeCookieAndCrumb()
@@ -30,21 +34,39 @@ class CrumbManager(private val client: OkHttpClient) {
     }
 
     private suspend fun primeCookieAndCrumb() = withContext(Dispatchers.IO) {
+        val debug = StringBuilder()
+
         runCatching {
-            client.newCall(Request.Builder().url("https://fc.yahoo.com").build()).execute().close()
+            client.newCall(Request.Builder().url("https://fc.yahoo.com").build()).execute().use {
+                debug.append("fc_http=${it.code}")
+            }
+        }.onFailure { e ->
+            debug.append("fc_err=${e.javaClass.simpleName}:${e.message}")
         }
+
         runCatching {
-            val response = client.newCall(
+            client.newCall(
                 Request.Builder().url("https://query2.finance.yahoo.com/v1/test/getcrumb").build()
             ).execute()
-            response.use {
-                if (it.isSuccessful) {
-                    val crumb = it.body?.string()?.trim()
-                    if (!crumb.isNullOrBlank() && !crumb.contains("<html", ignoreCase = true)) {
+        }.onFailure { e ->
+            debug.append(" getcrumb_err=${e.javaClass.simpleName}:${e.message}")
+        }.getOrNull()?.use { response ->
+            debug.append(" getcrumb_http=${response.code}")
+            if (response.isSuccessful) {
+                val crumb = response.body?.string()?.trim()
+                when {
+                    crumb.isNullOrBlank() -> debug.append(" body=blank")
+                    crumb.contains("<html", ignoreCase = true) -> debug.append(" body=html_page")
+                    else -> {
                         cachedCrumb = crumb
+                        debug.append(" body_len=${crumb.length}")
                     }
                 }
+            } else {
+                debug.append(" body=${response.body?.string()?.take(200)}")
             }
         }
+
+        lastAttemptDebug = debug.toString()
     }
 }
