@@ -26,6 +26,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
+import retrofit2.HttpException
 
 class StockRepository(
     private val api: YahooFinanceApi,
@@ -154,7 +155,16 @@ class StockRepository(
             api.getQuoteSummary(QUOTE_SUMMARY_URL + ticker, QUOTE_SUMMARY_MODULES, crumb)
                 .quoteSummary.result?.firstOrNull()
         }.onFailure { e ->
-            dataIssue = "quoteSummary: ${e.javaClass.simpleName}: ${e.message}"
+            val crumbState = if (crumb != null) "present" else "null"
+            dataIssue = if (e is HttpException) {
+                // Yahoo's error body usually names the actual rejection reason (e.g.
+                // "Invalid Crumb"), which is more useful here than the bare status code.
+                val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
+                    ?.take(300)
+                "quoteSummary: HTTP ${e.code()} crumb=$crumbState${if (!body.isNullOrBlank()) " body=$body" else ""}"
+            } else {
+                "quoteSummary: ${e.javaClass.simpleName}: ${e.message} crumb=$crumbState"
+            }
         }.getOrNull()
 
         if (quoteSummaryResult == null && dataIssue == null) {
