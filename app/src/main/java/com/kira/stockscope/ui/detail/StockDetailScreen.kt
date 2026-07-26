@@ -32,6 +32,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
@@ -158,8 +161,28 @@ private fun HeaderSection(report: StockReport) {
 
 @Composable
 private fun ChartSection(symbol: String) {
+    // The chart WebView loads only on request rather than automatically: if it's
+    // ever the thing going wrong on a given device, the rest of the report (which
+    // has nothing to do with WebView) stays usable regardless, instead of the
+    // whole screen riding on whether an embedded browser engine behaves.
+    var showChart by remember(symbol) { mutableStateOf(false) }
     SectionCard(title = "Chart") {
-        TradingViewChartCard(symbol = symbol, darkTheme = isSystemInDarkTheme())
+        if (showChart) {
+            TradingViewChartCard(symbol = symbol, darkTheme = isSystemInDarkTheme())
+        } else {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(vertical = 20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    "Chart loads on request.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.size(10.dp))
+                Button(onClick = { showChart = true }) { Text("Load chart") }
+            }
+        }
     }
 }
 
