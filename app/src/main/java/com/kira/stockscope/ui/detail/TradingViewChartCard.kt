@@ -37,9 +37,15 @@ fun TradingViewChartCard(symbol: String, darkTheme: Boolean) {
     // devices with no working WebView provider installed (a real, documented
     // Android failure mode, not hypothetical) — runCatching here means that takes
     // down just this chart card instead of crashing the whole detail screen.
+    // The availability check comes first because a *missing* WebView provider can
+    // fail at the native layer below what a JVM try/catch can intercept at all;
+    // checking first avoids ever calling the WebView constructor on such a device.
     AndroidView(
         modifier = Modifier.fillMaxWidth().height(420.dp),
         factory = { ctx ->
+            if (runCatching { WebView.getCurrentWebViewPackage() }.getOrNull() == null) {
+                return@AndroidView FrameLayout(ctx)
+            }
             runCatching {
                 WebView(ctx).apply {
                     layoutParams = ViewGroup.LayoutParams(
