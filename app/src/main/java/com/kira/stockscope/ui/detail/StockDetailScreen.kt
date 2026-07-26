@@ -358,7 +358,7 @@ private fun StochasticRow(k: Double?, d: Double?) {
     ) {
         Text("Stochastic (14,3,3)", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Row {
-            Text("%K %.1f / %D %.1f".format(k, d), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Text("%K ${"%.1f".format(k)} / %D ${"%.1f".format(d)}", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
             Spacer(Modifier.size(6.dp))
             Text(label, style = MaterialTheme.typography.bodySmall, color = color, fontWeight = FontWeight.Bold)
         }
