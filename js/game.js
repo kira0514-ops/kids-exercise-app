@@ -1112,7 +1112,7 @@
       stepProjectiles(dt);
       if (projectiles.length === 0) {
         if (mode === "demolition") {
-          if (blocks.length === 0) {
+          if (isLZClear()) {
             if (!heli) {
               turnState = "cutscene";
               heli = { x: W + 70, y: 90, vx: -2.4, targetY: 90, phase: "inbound", extractTimer: 0 };
@@ -1151,6 +1151,26 @@
     updateBlocks(dt);
     updateParticles(dt);
     updateMission(dt);
+  }
+
+  // The chopper only needs a clear shaft of air directly above the troops
+  // to descend through -- it doesn't care whether rubble from the side
+  // walls is still lying around elsewhere. Checking "every block in the
+  // whole bunker is gone" made the mission drag on well past the point
+  // the LZ was actually flyable, since the side walls sit outside this
+  // corridor and never blocked the vertical approach in the first place.
+  function isLZClear() {
+    const corridorHalfWidth = 22;
+    const left = TROOPS_X - corridorHalfWidth;
+    const right = TROOPS_X + corridorHalfWidth;
+    const groundY = terrainAt(TROOPS_X);
+    for (const block of blocks) {
+      const aabb = blockAABB(block);
+      const overlapsX = aabb.minX < right && aabb.maxX > left;
+      const overlapsY = aabb.maxY > 60 && aabb.minY < groundY;
+      if (overlapsX && overlapsY) return false;
+    }
+    return true;
   }
 
   // ---------------------------------------------------------------------
