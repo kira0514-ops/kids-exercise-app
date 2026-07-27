@@ -2044,6 +2044,96 @@
     }
   }
 
+  // A permanent steel reinforcement frame around the troops' room, plus a
+  // landing platform mounted above it on its own support posts. Purely a
+  // visual marker -- unlike the sandbag/concrete blocks it's never
+  // destructible -- so the room's true boundary and the chopper's landing
+  // gate stay legible no matter how much rubble is piled up or cleared.
+  function drawRoomFrame() {
+    const groundY = terrainAt(TROOPS_X);
+    const roomLeft = TROOPS_X - BUNKER_HALF_WIDTH;
+    const roomRight = TROOPS_X + BUNKER_HALF_WIDTH;
+    const roomTop = groundY - BUNKER_WALL_HEIGHT * BLOCK_H;
+    const roofTop = roomTop - 2 * BLOCK_H;
+    const barW = 6;
+
+    function steelBar(x, yTop, yBottom) {
+      ctx.save();
+      const grad = ctx.createLinearGradient(x - barW / 2, 0, x + barW / 2, 0);
+      grad.addColorStop(0, "#2b333b");
+      grad.addColorStop(0.4, "#c7d1da");
+      grad.addColorStop(0.6, "#8b98a3");
+      grad.addColorStop(1, "#232a30");
+      ctx.fillStyle = grad;
+      ctx.fillRect(x - barW / 2, yTop, barW, yBottom - yTop);
+      ctx.strokeStyle = "#161b1f";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x - barW / 2, yTop, barW, yBottom - yTop);
+      ctx.fillStyle = "#161b1f";
+      for (let ry = yTop + 7; ry < yBottom - 3; ry += 13) {
+        ctx.beginPath();
+        ctx.arc(x, ry, 1.3, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Vertical bars framing both sides of the room, ground to ceiling.
+    steelBar(roomLeft, roomTop, groundY);
+    steelBar(roomRight, roomTop, groundY);
+
+    // Lintel tying the two bars together across the room's ceiling.
+    ctx.save();
+    const lintelGrad = ctx.createLinearGradient(0, roomTop - barW / 2, 0, roomTop + barW / 2);
+    lintelGrad.addColorStop(0, "#c7d1da");
+    lintelGrad.addColorStop(1, "#232a30");
+    ctx.fillStyle = lintelGrad;
+    ctx.fillRect(roomLeft - barW / 2, roomTop - barW / 2, roomRight - roomLeft + barW, barW);
+    ctx.strokeStyle = "#161b1f";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(roomLeft - barW / 2, roomTop - barW / 2, roomRight - roomLeft + barW, barW);
+    ctx.restore();
+
+    // Landing platform mounted above the frame on its own support posts --
+    // the helipad gate lined up directly over the room below.
+    const padY = roofTop - 26;
+    const padHalfW = BUNKER_HALF_WIDTH + 16;
+    steelBar(roomLeft + 3, padY, roomTop);
+    steelBar(roomRight - 3, padY, roomTop);
+
+    ctx.save();
+    ctx.setLineDash([4, 5]);
+    ctx.strokeStyle = "rgba(255,209,102,0.35)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(TROOPS_X, padY);
+    ctx.lineTo(TROOPS_X, groundY - 20);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    const deckGrad = ctx.createLinearGradient(0, padY - 6, 0, padY + 6);
+    deckGrad.addColorStop(0, "#8b98a3");
+    deckGrad.addColorStop(1, "#3a434b");
+    ctx.fillStyle = deckGrad;
+    ctx.fillRect(TROOPS_X - padHalfW, padY - 6, padHalfW * 2, 12);
+    ctx.strokeStyle = "#161b1f";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(TROOPS_X - padHalfW, padY - 6, padHalfW * 2, 12);
+
+    ctx.strokeStyle = "#ffd166";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(TROOPS_X, padY, padHalfW * 0.55, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = "#ffd166";
+    ctx.font = "bold 13px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("H", TROOPS_X, padY + 0.5);
+    ctx.restore();
+  }
+
   function drawHeli() {
     if (!heli) return;
     ctx.save();
@@ -2133,6 +2223,7 @@
     drawTroops();
     for (const tank of tanks) drawTank(tank);
     drawBlocks();
+    if (mode === "demolition") drawRoomFrame();
     drawAimPreview();
     drawProjectiles();
     drawParticles();

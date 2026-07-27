@@ -73,7 +73,11 @@ sideways every turn. Destroy the other tank before it destroys you.
   physically kept clear -- any block knocked loose by an explosion gets
   deflected off the room's boundary (the wall lines, the roof's
   underside) instead of tumbling in and piling up on the squad, so
-  debris collects around the room, never inside it.
+  debris collects around the room, never inside it. A permanent steel
+  frame (side bars plus a ceiling lintel) marks the room's true
+  boundary regardless of how much sandbag/concrete rubble is still
+  standing, and a landing platform mounted on its own posts above the
+  frame marks the helipad gate the chopper lines up with on its way in.
 
 ## Files
 
