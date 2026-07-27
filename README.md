@@ -35,11 +35,12 @@ sideways every turn. Destroy the other tank before it destroys you.
   scratch — no game engine dependency.
 - Procedurally generated, fully destructible terrain: explosions carve
   permanent craters, and tanks settle onto the new surface.
-- A crate pyramid guarding each tank, with lightweight rigid-body-ish block
-  physics: gravity, rotation, sleep/wake, and collision against terrain,
-  other blocks, and tanks, so a damaged structure topples and collapses
-  instead of just vanishing (a falling block can even crush a tank beneath
-  it).
+- A crate pyramid guarding each tank (and two much taller towers in
+  Demolition mode), with lightweight rigid-body-ish block physics: gravity,
+  rotation, impact-driven toppling torque, sleep/wake, and collision against
+  terrain, other blocks, and tanks, so knocking out a support block can
+  bring down a real domino-style cascade instead of the structure just
+  vanishing (a falling block can even crush a tank beneath it).
 - Drag-to-aim controls (mouse or touch via Pointer Events) with a live
   trajectory preview and power meter.
 - Four weapons with distinct speed, blast radius, and damage, including a

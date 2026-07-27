@@ -19,7 +19,8 @@
 
   const BLOCK_W = 26;
   const BLOCK_H = 20;
-  const BLOCK_RESTITUTION = 0.22;
+  const BLOCK_GRAVITY = GRAVITY * 1.2;
+  const BLOCK_RESTITUTION = 0.3;
   const BLOCK_SLEEP_SPEED = 0.4;
   const BLOCK_SLEEP_FRAMES = 18;
 
@@ -347,12 +348,18 @@
       }
     }
     if (maxPenetration > 0) {
+      const incomingSpeed = b.vy;
       b.y -= maxPenetration;
       if (b.vy > 0) b.vy = -b.vy * BLOCK_RESTITUTION;
       b.vx *= 0.85;
       // Nudge rotation toward whichever side is digging in deepest, so a
-      // block resting off-balance keeps tipping until it lies flat.
-      b.av += (contactX - b.x) * 0.0015;
+      // block resting off-balance keeps tipping until it lies flat. Gated
+      // to genuine landing impacts (real incoming downward speed) so a
+      // block that's already settled doesn't get re-torqued every frame
+      // forever, which would never let it fully come to rest.
+      if (incomingSpeed > 0.3) {
+        b.av += (contactX - b.x) * 0.002;
+      }
       b.av *= 0.9;
     }
   }
@@ -394,6 +401,12 @@
     const bMovable = b.awake;
     if (!aMovable && !bMovable) return;
 
+    // Relative speed going into this resolution -- used to gate the torque
+    // nudges below to genuine impacts. Without this gate, two blocks
+    // resting in continuous contact (the normal steady state for a stack)
+    // would get re-torqued every single frame forever and never settle.
+    const preImpact = Math.abs(a.vx - b.vx) + Math.abs(a.vy - b.vy);
+
     if (overlapX < overlapY) {
       const dir = a.x < b.x ? -1 : 1;
       if (aMovable && bMovable) {
@@ -407,6 +420,15 @@
       const relVx = a.vx - b.vx;
       if (aMovable) a.vx -= relVx * 0.5;
       if (bMovable) b.vx += relVx * 0.5;
+      // A side impact torques both blocks depending on whether it lands
+      // above or below their centers, so a shove doesn't just slide --
+      // it can start a block spinning/toppling.
+      if (preImpact > 0.6) {
+        const vOffset = a.y - b.y;
+        const spin = Math.max(-0.4, Math.min(0.4, vOffset * 0.02 * dir));
+        if (aMovable) a.av -= spin;
+        if (bMovable) b.av += spin;
+      }
     } else {
       const dir = a.y < b.y ? -1 : 1;
       if (aMovable && bMovable) {
@@ -424,6 +446,14 @@
       }
       if (aMovable) a.vx *= 0.9;
       if (bMovable) b.vx *= 0.9;
+      // Whichever block is on top tips toward whichever side of its
+      // support it overhangs, instead of balancing on it forever -- only
+      // while it's actively landing, not every frame it merely rests there.
+      if (preImpact > 0.6) {
+        const hOffset = a.x - b.x;
+        if (dir < 0 && aMovable) a.av += hOffset * 0.0025;
+        if (dir > 0 && bMovable) b.av -= hOffset * 0.0025;
+      }
     }
 
     const impactForce = Math.abs(a.vx) + Math.abs(a.vy) + Math.abs(b.vx) + Math.abs(b.vy);
@@ -449,15 +479,15 @@
   function updateBlocks(dt) {
     for (const b of blocks) {
       if (!b.awake) continue;
-      b.vy += GRAVITY * dt;
+      b.vy += BLOCK_GRAVITY * dt;
       b.vx *= 0.995;
-      b.av *= 0.92;
+      b.av *= 0.94;
       b.x += b.vx * dt;
       b.y += b.vy * dt;
       b.angle += b.av * dt;
-      b.vx = Math.max(-20, Math.min(20, b.vx));
-      b.vy = Math.max(-20, Math.min(20, b.vy));
-      b.av = Math.max(-0.6, Math.min(0.6, b.av));
+      b.vx = Math.max(-22, Math.min(22, b.vx));
+      b.vy = Math.max(-22, Math.min(22, b.vy));
+      b.av = Math.max(-0.85, Math.min(0.85, b.av));
       resolveBlockTerrain(b);
       resolveBlockTank(b);
     }
@@ -519,10 +549,10 @@
         const falloff = Math.max(0, 1 - d / reach);
         block.hp -= weapon.damage * falloff * 1.4;
         const ang = Math.atan2(block.y - y, block.x - x);
-        const force = falloff * (weapon.damage / 10);
+        const force = falloff * (weapon.damage / 7);
         block.vx += Math.cos(ang) * force;
         block.vy += Math.sin(ang) * force - force * 0.5;
-        block.av += rand(-0.2, 0.2) * falloff;
+        block.av += rand(-0.35, 0.35) * falloff;
         block.awake = true;
       }
       if (block.hp > 0) survivors.push(block);
@@ -547,7 +577,10 @@
     const p1 = makeTank("left", "Player 1", "#e63946", false);
     if (mode === "demolition") {
       tanks = [p1];
-      blocks = [...makeBlockStack(W * 0.58, [4, 3, 2, 1]), ...makeBlockStack(W * 0.83, [3, 2, 1])];
+      blocks = [
+        ...makeBlockStack(W * 0.58, [6, 5, 4, 3, 2, 1]),
+        ...makeBlockStack(W * 0.85, [5, 4, 3, 2, 1]),
+      ];
       shotsFired = 0;
       restartBtn.textContent = "New Structure";
     } else {
@@ -556,7 +589,7 @@
           ? makeTank("right", "CPU", "#457b9d", true)
           : makeTank("right", "Player 2", "#457b9d", false);
       tanks = [p1, p2];
-      blocks = [...makeBlockStack(p1.x + 100, [3, 2, 1]), ...makeBlockStack(p2.x - 100, [3, 2, 1])];
+      blocks = [...makeBlockStack(p1.x + 100, [4, 3, 2, 1]), ...makeBlockStack(p2.x - 100, [4, 3, 2, 1])];
       restartBtn.textContent = "New Battle";
     }
 
