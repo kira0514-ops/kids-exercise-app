@@ -13,9 +13,9 @@
   const SUBSTEPS = 4;
   const MAX_DRAG = 150;
   const POWER_SCALE = 0.16;
-  const TANK_W = 34;
-  const TANK_H = 16;
-  const BARREL_LEN = 26;
+  const TANK_W = 44;
+  const TANK_H = 20;
+  const BARREL_LEN = 32;
 
   const turnIndicatorEl = document.getElementById("turn-indicator");
   const windIndicatorEl = document.getElementById("wind-indicator");
@@ -81,6 +81,7 @@
   let mountains = [];
   let clouds = [];
   let rocks = [];
+  let birds = [];
   let tanks = []; // [player1, player2]
   let currentTurn = 0; // index into tanks
   let wind = 0;
@@ -158,6 +159,15 @@
     return clouds;
   }
 
+  function generateBirds() {
+    const birds = [];
+    const count = Math.round(rand(0, 3));
+    for (let i = 0; i < count; i++) {
+      birds.push({ x: rand(0, W), y: rand(90, 220) });
+    }
+    return birds;
+  }
+
   function generateRocks() {
     const rocks = [];
     for (let i = 0; i < 90; i++) {
@@ -194,6 +204,17 @@
   // ---------------------------------------------------------------------
   function makeTank(side, label, color, isAI) {
     const x = side === "left" ? rand(60, 120) : rand(W - 120, W - 60);
+    const camo = [];
+    for (let i = 0; i < 4; i++) {
+      camo.push({
+        dx: rand(-TANK_W * 0.4, TANK_W * 0.4),
+        dy: rand(-TANK_H * 0.75, -TANK_H * 0.1),
+        rx: rand(6, 11),
+        ry: rand(3.5, 6),
+        rot: rand(0, Math.PI),
+        shade: rand(-26, -8),
+      });
+    }
     return {
       side,
       label,
@@ -206,6 +227,7 @@
       power: 60, // percent
       ammo: { ...STARTING_AMMO },
       alive: true,
+      camo,
     };
   }
 
@@ -225,6 +247,7 @@
     mountains = generateMountains();
     clouds = generateClouds();
     rocks = generateRocks();
+    birds = generateBirds();
     const p1 = makeTank("left", "Player 1", "#e63946", false);
     const p2 =
       mode === "ai"
@@ -649,6 +672,17 @@
       ctx.fill();
     }
 
+    // A couple of distant birds for a touch of life on the horizon.
+    ctx.strokeStyle = "rgba(60,70,85,0.55)";
+    ctx.lineWidth = 1.4;
+    for (const b of birds) {
+      ctx.beginPath();
+      ctx.moveTo(b.x - 7, b.y);
+      ctx.quadraticCurveTo(b.x - 3, b.y - 5, b.x, b.y);
+      ctx.quadraticCurveTo(b.x + 3, b.y - 5, b.x + 7, b.y);
+      ctx.stroke();
+    }
+
     // Hazy distant mountains for parallax depth behind the real terrain.
     ctx.beginPath();
     ctx.moveTo(0, H);
@@ -658,6 +692,15 @@
     ctx.closePath();
     ctx.fillStyle = "rgba(99,120,140,0.45)";
     ctx.fill();
+
+    // Atmospheric haze where the mountains fade into the nearer terrain,
+    // giving the horizon a sense of distance.
+    const hazeTop = Math.min(...mountains) - 10;
+    const haze = ctx.createLinearGradient(0, hazeTop, 0, hazeTop + 90);
+    haze.addColorStop(0, "rgba(226,235,230,0)");
+    haze.addColorStop(1, "rgba(226,235,230,0.55)");
+    ctx.fillStyle = haze;
+    ctx.fillRect(0, hazeTop, W, 90);
   }
 
   function terrainPath() {
@@ -728,69 +771,140 @@
     const dir = facingSign(tank);
     const dark = shadeColor(color, -28);
     const darker = shadeColor(color, -45);
+    const darkest = shadeColor(color, -60);
     const light = shadeColor(color, 18);
 
     // Health bar
-    const hbW = 40;
+    const hbW = 44;
     ctx.fillStyle = "rgba(0,0,0,0.4)";
-    ctx.fillRect(x - hbW / 2, y - TANK_H - 20, hbW, 6);
+    ctx.fillRect(x - hbW / 2, y - TANK_H - 24, hbW, 6);
     ctx.fillStyle = tank.hp > 40 ? "#06d6a0" : "#ef476f";
-    ctx.fillRect(x - hbW / 2, y - TANK_H - 20, hbW * (tank.hp / 100), 6);
+    ctx.fillRect(x - hbW / 2, y - TANK_H - 24, hbW * (tank.hp / 100), 6);
 
-    // Contact shadow.
-    ctx.fillStyle = "rgba(0,0,0,0.3)";
+    // Contact shadow, soft and wider than the hull for a grounded feel.
+    const shadowGrad = ctx.createRadialGradient(x, y + 2, 2, x, y + 2, TANK_W / 2 + 10);
+    shadowGrad.addColorStop(0, "rgba(0,0,0,0.38)");
+    shadowGrad.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = shadowGrad;
     ctx.beginPath();
-    ctx.ellipse(x, y + 2, TANK_W / 2 + 6, 4, 0, 0, Math.PI * 2);
+    ctx.ellipse(x, y + 2, TANK_W / 2 + 10, 5, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    // Tracks: a dark rounded band wider than the hull, with road wheels and
-    // a lighter top run for a sense of tension/roundness.
-    const trackW = TANK_W + 8;
-    const trackH = 9;
+    // Tracks: a dark rounded band wider than the hull, with road wheels
+    // visible through gaps in a row of individual track links.
+    const trackW = TANK_W + 10;
+    const trackH = 11;
     const trackX = x - trackW / 2;
     const trackY = y - trackH;
-    ctx.fillStyle = "#1c1c1c";
-    roundRect(trackX, trackY, trackW, trackH, 4);
+    roundRect(trackX, trackY, trackW, trackH, 5);
+    ctx.fillStyle = "#17181a";
     ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,0.12)";
-    ctx.fillRect(trackX + 2, trackY + 1.5, trackW - 4, 1.5);
-    ctx.fillStyle = "#3a3a3a";
-    const wheelCount = 4;
+
+    ctx.fillStyle = "#3f4145";
+    const wheelCount = 5;
+    const wheelR = trackH / 2 - 1.4;
     for (let i = 0; i < wheelCount; i++) {
       const wx = trackX + trackW * ((i + 0.5) / wheelCount);
       ctx.beginPath();
-      ctx.arc(wx, trackY + trackH / 2, trackH / 2 - 1, 0, Math.PI * 2);
+      ctx.arc(wx, trackY + trackH / 2, wheelR, 0, Math.PI * 2);
       ctx.fill();
+      ctx.fillStyle = "#232427";
+      ctx.beginPath();
+      ctx.arc(wx, trackY + trackH / 2, wheelR * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#3f4145";
     }
 
+    // Individual track links along the top run.
+    const linkCount = Math.round(trackW / 4.5);
+    for (let i = 0; i < linkCount; i++) {
+      const lx = trackX + (i + 0.5) * (trackW / linkCount);
+      ctx.fillStyle = i % 2 === 0 ? "#4a4d52" : "#2a2c2f";
+      ctx.fillRect(lx - 1.4, trackY + 0.5, 2.8, 2.5);
+    }
+    ctx.fillStyle = "rgba(255,255,255,0.1)";
+    ctx.fillRect(trackX + 3, trackY + 0.5, trackW - 6, 1);
+
     // Hull: an asymmetric trapezoid with a sloped glacis plate facing the
-    // direction the tank is pointed, shaded with a top-down gradient.
-    const hullY = trackY;
+    // direction the tank is pointed, shaded with a top-down gradient, then
+    // camo blotches and weathering details clipped to the hull silhouette.
+    const hullY = trackY + 1;
     const hullTop = hullY - TANK_H;
     const frontX = x + (dir * TANK_W) / 2;
     const rearX = x - (dir * TANK_W) / 2;
-    const slopeInset = dir * 10;
-    ctx.beginPath();
-    ctx.moveTo(rearX, hullY);
-    ctx.lineTo(rearX, hullTop);
-    ctx.lineTo(frontX - slopeInset, hullTop);
-    ctx.lineTo(frontX, hullTop + TANK_H * 0.55);
-    ctx.lineTo(frontX, hullY);
-    ctx.closePath();
+    const slopeInset = dir * 13;
+    const hullPath = () => {
+      ctx.beginPath();
+      ctx.moveTo(rearX, hullY);
+      ctx.lineTo(rearX, hullTop + TANK_H * 0.15);
+      ctx.lineTo(rearX + dir * 4, hullTop);
+      ctx.lineTo(frontX - slopeInset, hullTop);
+      ctx.lineTo(frontX, hullTop + TANK_H * 0.5);
+      ctx.lineTo(frontX, hullY);
+      ctx.closePath();
+    };
+    hullPath();
     const hullGrad = ctx.createLinearGradient(0, hullTop, 0, hullY);
     hullGrad.addColorStop(0, light);
-    hullGrad.addColorStop(0.55, color);
+    hullGrad.addColorStop(0.5, color);
     hullGrad.addColorStop(1, dark);
     ctx.fillStyle = hullGrad;
     ctx.fill();
-    ctx.strokeStyle = darker;
-    ctx.lineWidth = 1.5;
+
+    ctx.save();
+    hullPath();
+    ctx.clip();
+    for (const c of tank.camo) {
+      ctx.fillStyle = shadeColor(color, c.shade);
+      ctx.beginPath();
+      ctx.ellipse(x + c.dx, hullTop + TANK_H * 0.5 + c.dy, c.rx, c.ry, c.rot, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // Rim light along the top-facing edge (sun is upper-right).
+    ctx.strokeStyle = "rgba(255,255,255,0.35)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(rearX + dir * 4, hullTop + 0.5);
+    ctx.lineTo(frontX - slopeInset, hullTop + 0.5);
+    ctx.stroke();
+    // Lower hull ambient occlusion where it meets the tracks.
+    const aoGrad = ctx.createLinearGradient(0, hullY - 5, 0, hullY);
+    aoGrad.addColorStop(0, "rgba(0,0,0,0)");
+    aoGrad.addColorStop(1, "rgba(0,0,0,0.32)");
+    ctx.fillStyle = aoGrad;
+    ctx.fillRect(rearX - 2, hullY - 5, TANK_W + 4, 5);
+    ctx.restore();
+
+    ctx.strokeStyle = darkest;
+    ctx.lineWidth = 1.3;
+    hullPath();
     ctx.stroke();
 
-    // Hatch.
-    ctx.fillStyle = darker;
+    // Headlight at the front.
+    ctx.fillStyle = "#ffe9a8";
     ctx.beginPath();
-    ctx.arc(x - dir * 6, hullTop + TANK_H * 0.4, 3.2, 0, Math.PI * 2);
+    ctx.arc(frontX - dir * 4, hullTop + TANK_H * 0.62, 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = darkest;
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+
+    // Painted star insignia on the hull side.
+    drawStar(x - dir * TANK_W * 0.06, hullTop + TANK_H * 0.62, 4.2, "rgba(255,255,255,0.85)");
+
+    // Hatch + rear exhaust with a soft rising smoke wisp.
+    ctx.fillStyle = darkest;
+    ctx.beginPath();
+    ctx.arc(x - dir * 6, hullTop + TANK_H * 0.32, 3, 0, Math.PI * 2);
+    ctx.fill();
+
+    const exhaustX = rearX + dir * 3;
+    ctx.fillStyle = "#232323";
+    ctx.fillRect(exhaustX - 2, hullY - 4, 4, 4);
+    const smokeT = (performance.now() / 900) % 1;
+    ctx.fillStyle = `rgba(200,200,200,${0.22 * (1 - smokeT)})`;
+    ctx.beginPath();
+    ctx.arc(exhaustX - dir * 2, hullY - 6 - smokeT * 14, 2 + smokeT * 4, 0, Math.PI * 2);
     ctx.fill();
 
     // Turret + barrel, both rotated around the pivot to point at the aim angle.
@@ -802,50 +916,101 @@
       angleRad = Math.atan2(-Math.sin((tank.angle * Math.PI) / 180), dir * Math.cos((tank.angle * Math.PI) / 180));
     }
     const pivotX = x;
-    const pivotY = hullTop;
+    const pivotY = hullTop + 1;
 
+    // Turret body: an elongated, boat-shaped shell (wider at the back for the
+    // bustle, tapering toward the mantlet) rather than a plain circle.
     ctx.save();
     ctx.translate(pivotX, pivotY);
     ctx.rotate(angleRad);
-    ctx.fillStyle = dark;
-    ctx.fillRect(0, -3.2, BARREL_LEN, 6.4);
-    ctx.fillStyle = "rgba(255,255,255,0.25)";
-    ctx.fillRect(2, -3.2, BARREL_LEN - 4, 1.4);
-    ctx.fillStyle = darker;
-    ctx.fillRect(BARREL_LEN - 4, -4.2, 4, 8.4);
-    ctx.restore();
-
-    // Antenna.
-    ctx.strokeStyle = darker;
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(pivotX - dir * 6, pivotY - 4);
-    ctx.quadraticCurveTo(pivotX - dir * 14, pivotY - 16, pivotX - dir * 10, pivotY - 26);
-    ctx.stroke();
-
-    const turretGrad = ctx.createRadialGradient(
-      pivotX - dir * 3,
-      pivotY - 3,
-      1,
-      pivotX,
-      pivotY,
-      11
-    );
+    const turretGrad = ctx.createLinearGradient(0, -8, 0, 8);
     turretGrad.addColorStop(0, light);
+    turretGrad.addColorStop(0.5, color);
     turretGrad.addColorStop(1, dark);
     ctx.fillStyle = turretGrad;
     ctx.beginPath();
-    ctx.arc(pivotX, pivotY, 9.5, 0, Math.PI * 2);
+    ctx.moveTo(-11, -6.5);
+    ctx.quadraticCurveTo(-13, 0, -11, 6.5);
+    ctx.quadraticCurveTo(2, 8.5, 9, 5);
+    ctx.quadraticCurveTo(13, 0, 9, -5);
+    ctx.quadraticCurveTo(2, -8.5, -11, -6.5);
+    ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = darker;
-    ctx.lineWidth = 1.2;
+    ctx.strokeStyle = darkest;
+    ctx.lineWidth = 1.1;
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.3)";
+    ctx.lineWidth = 0.8;
+    ctx.beginPath();
+    ctx.moveTo(-9, -5.5);
+    ctx.quadraticCurveTo(0, -7.2, 8, -4.3);
+    ctx.stroke();
+
+    // Mantlet (armored gun mount) where the barrel meets the turret.
+    ctx.fillStyle = darker;
+    ctx.beginPath();
+    ctx.ellipse(9, 0, 4.5, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Barrel: tapered with a highlight and a muzzle brake ring at the tip.
+    ctx.fillStyle = dark;
+    ctx.beginPath();
+    ctx.moveTo(6, -3.4);
+    ctx.lineTo(BARREL_LEN, -2.2);
+    ctx.lineTo(BARREL_LEN, 2.2);
+    ctx.lineTo(6, 3.4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.25)";
+    ctx.fillRect(8, -2.6, BARREL_LEN - 12, 1.2);
+    ctx.fillStyle = darkest;
+    ctx.fillRect(BARREL_LEN - 4, -3.6, 4, 7.2);
+
+    // Commander's cupola.
+    ctx.fillStyle = dark;
+    ctx.beginPath();
+    ctx.arc(-6, -1, 3.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = darkest;
+    ctx.lineWidth = 0.7;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(-8, -1);
+    ctx.lineTo(-4, -1);
+    ctx.stroke();
+    ctx.restore();
+
+    // Antenna, anchored to the turret bustle.
+    const bustleX = pivotX - Math.cos(angleRad) * 11;
+    const bustleY = pivotY - Math.sin(angleRad) * 11;
+    ctx.strokeStyle = darkest;
+    ctx.lineWidth = 1.1;
+    ctx.beginPath();
+    ctx.moveTo(bustleX, bustleY);
+    ctx.quadraticCurveTo(bustleX - dir * 6, bustleY - 18, bustleX - dir * 2, bustleY - 30);
     ctx.stroke();
 
     // Label
     ctx.fillStyle = "#fff";
     ctx.font = "12px Trebuchet MS";
     ctx.textAlign = "center";
-    ctx.fillText(tank.label, x, y - TANK_H - 26);
+    ctx.fillText(tank.label, x, y - TANK_H - 30);
+  }
+
+  function drawStar(cx, cy, r, fillStyle) {
+    const inner = r * 0.45;
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const rad = i % 2 === 0 ? r : inner;
+      const ang = (Math.PI / 5) * i - Math.PI / 2;
+      const px = cx + Math.cos(ang) * rad;
+      const py = cy + Math.sin(ang) * rad;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fillStyle = fillStyle;
+    ctx.fill();
   }
 
   function roundRect(x, y, w, h, r) {
