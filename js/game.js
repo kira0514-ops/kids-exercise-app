@@ -12,7 +12,7 @@
   const GRAVITY = 0.22;
   const SUBSTEPS = 4;
   const MAX_DRAG = 150;
-  const POWER_SCALE = 0.16;
+  const POWER_SCALE = 0.1;
   const TANK_W = 44;
   const TANK_H = 20;
   const BARREL_LEN = 32;
