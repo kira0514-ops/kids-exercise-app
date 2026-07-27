@@ -78,6 +78,9 @@
   // ---------------------------------------------------------------------
   let mode = null; // '2p' | 'ai'
   let terrain = [];
+  let mountains = [];
+  let clouds = [];
+  let rocks = [];
   let tanks = []; // [player1, player2]
   let currentTurn = 0; // index into tanks
   let wind = 0;
@@ -94,6 +97,15 @@
 
   function rand(min, max) {
     return min + Math.random() * (max - min);
+  }
+
+  function shadeColor(hex, percent) {
+    const n = parseInt(hex.slice(1), 16);
+    const amt = Math.round(2.55 * percent);
+    const r = Math.max(0, Math.min(255, (n >> 16) + amt));
+    const g = Math.max(0, Math.min(255, ((n >> 8) & 0xff) + amt));
+    const b = Math.max(0, Math.min(255, (n & 0xff) + amt));
+    return `rgb(${r},${g},${b})`;
   }
 
   // ---------------------------------------------------------------------
@@ -113,6 +125,50 @@
       t[x] = y;
     }
     return t;
+  }
+
+  // A second, hazier heightmap sitting above and behind the real terrain,
+  // purely decorative, to give the horizon some parallax depth.
+  function generateMountains() {
+    const baseY = H * 0.42;
+    const waves = [
+      { amp: rand(30, 55), freq: rand(0.002, 0.004), phase: rand(0, Math.PI * 2) },
+      { amp: rand(10, 20), freq: rand(0.006, 0.012), phase: rand(0, Math.PI * 2) },
+    ];
+    const m = new Array(W + 1);
+    for (let x = 0; x <= W; x++) {
+      let y = baseY;
+      for (const w of waves) y += w.amp * Math.sin(x * w.freq + w.phase);
+      m[x] = y;
+    }
+    return m;
+  }
+
+  function generateClouds() {
+    const clouds = [];
+    const count = Math.round(rand(3, 6));
+    for (let i = 0; i < count; i++) {
+      clouds.push({
+        x: rand(0, W),
+        y: rand(40, 150),
+        scale: rand(0.6, 1.3),
+        opacity: rand(0.35, 0.65),
+      });
+    }
+    return clouds;
+  }
+
+  function generateRocks() {
+    const rocks = [];
+    for (let i = 0; i < 90; i++) {
+      rocks.push({
+        x: rand(0, W),
+        depth: rand(6, 220),
+        r: rand(1.5, 4.5),
+        shade: rand(-18, 14),
+      });
+    }
+    return rocks;
   }
 
   function terrainAt(x) {
@@ -166,6 +222,9 @@
   // ---------------------------------------------------------------------
   function newBattle() {
     terrain = generateTerrain();
+    mountains = generateMountains();
+    clouds = generateClouds();
+    rocks = generateRocks();
     const p1 = makeTank("left", "Player 1", "#e63946", false);
     const p2 =
       mode === "ai"
@@ -561,14 +620,43 @@
   // ---------------------------------------------------------------------
   function drawBackground() {
     const sky = ctx.createLinearGradient(0, 0, 0, H);
-    sky.addColorStop(0, "#6ba3c9");
-    sky.addColorStop(1, "#cfe8f2");
+    sky.addColorStop(0, "#3f7cad");
+    sky.addColorStop(0.55, "#7fb4d8");
+    sky.addColorStop(1, "#e3ecdf");
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, W, H);
 
-    ctx.fillStyle = "#ffe66d";
+    // Sun with a soft glow.
+    const sunX = 820;
+    const sunY = 75;
+    const glow = ctx.createRadialGradient(sunX, sunY, 4, sunX, sunY, 70);
+    glow.addColorStop(0, "rgba(255,247,214,0.9)");
+    glow.addColorStop(1, "rgba(255,247,214,0)");
+    ctx.fillStyle = glow;
+    ctx.fillRect(sunX - 70, sunY - 70, 140, 140);
+    ctx.fillStyle = "#fff3c4";
     ctx.beginPath();
-    ctx.arc(820, 70, 36, 0, Math.PI * 2);
+    ctx.arc(sunX, sunY, 28, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Soft clouds.
+    for (const c of clouds) {
+      ctx.fillStyle = `rgba(255,255,255,${c.opacity})`;
+      ctx.beginPath();
+      ctx.ellipse(c.x, c.y, 34 * c.scale, 14 * c.scale, 0, 0, Math.PI * 2);
+      ctx.ellipse(c.x + 26 * c.scale, c.y + 4 * c.scale, 24 * c.scale, 12 * c.scale, 0, 0, Math.PI * 2);
+      ctx.ellipse(c.x - 24 * c.scale, c.y + 5 * c.scale, 22 * c.scale, 11 * c.scale, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Hazy distant mountains for parallax depth behind the real terrain.
+    ctx.beginPath();
+    ctx.moveTo(0, H);
+    ctx.lineTo(0, mountains[0]);
+    for (let x = 0; x <= W; x += 4) ctx.lineTo(x, mountains[x]);
+    ctx.lineTo(W, H);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(99,120,140,0.45)";
     ctx.fill();
   }
 
@@ -583,28 +671,64 @@
 
   function drawTerrain() {
     terrainPath();
-    ctx.fillStyle = "#6b4423";
+    const dirt = ctx.createLinearGradient(0, H * 0.4, 0, H);
+    dirt.addColorStop(0, "#8a5a34");
+    dirt.addColorStop(0.35, "#6b4423");
+    dirt.addColorStop(1, "#432711");
+    ctx.fillStyle = dirt;
     ctx.fill();
 
-    // Grass cap: clip to the terrain shape and stroke the surface line with a
-    // thick green stroke, so only the half of it below the surface shows,
-    // giving a consistent-thickness grass band regardless of hill height.
     ctx.save();
     terrainPath();
     ctx.clip();
+
+    // Scattered rock/pebble speckles embedded in the dirt for texture.
+    for (const rk of rocks) {
+      const y = terrainAt(rk.x) + rk.depth;
+      if (y > H - 2) continue;
+      ctx.fillStyle = shadeColor("#6b4423", rk.shade);
+      ctx.beginPath();
+      ctx.ellipse(rk.x, y, rk.r, rk.r * 0.7, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Grass cap: stroke the surface line with a thick green stroke while
+    // clipped to the terrain shape, so only the half below the surface
+    // shows, giving a consistent-thickness grass band regardless of hill
+    // height, then add short tufts for a less flat silhouette.
     ctx.beginPath();
     ctx.moveTo(0, terrain[0]);
     for (let x = 0; x <= W; x += 2) ctx.lineTo(x, terrain[x]);
-    ctx.strokeStyle = "#7cb95a";
+    const grass = ctx.createLinearGradient(0, H * 0.3, 0, H * 0.55);
+    grass.addColorStop(0, "#9ed373");
+    grass.addColorStop(1, "#5e9440");
+    ctx.strokeStyle = grass;
     ctx.lineWidth = 22;
     ctx.lineJoin = "round";
     ctx.stroke();
+
+    ctx.strokeStyle = "#7cb95a";
+    ctx.lineWidth = 2;
+    for (let x = 4; x <= W; x += 9) {
+      const ty = terrainAt(x);
+      const tuftH = 5 + ((x * 37) % 5);
+      ctx.beginPath();
+      ctx.moveTo(x, ty - 8);
+      ctx.lineTo(x - 2, ty - 8 - tuftH);
+      ctx.moveTo(x, ty - 8);
+      ctx.lineTo(x + 2, ty - 8 - tuftH * 0.7);
+      ctx.stroke();
+    }
     ctx.restore();
   }
 
   function drawTank(tank) {
     if (!tank.alive) return;
     const { x, y, color } = tank;
+    const dir = facingSign(tank);
+    const dark = shadeColor(color, -28);
+    const darker = shadeColor(color, -45);
+    const light = shadeColor(color, 18);
 
     // Health bar
     const hbW = 40;
@@ -613,33 +737,108 @@
     ctx.fillStyle = tank.hp > 40 ? "#06d6a0" : "#ef476f";
     ctx.fillRect(x - hbW / 2, y - TANK_H - 20, hbW * (tank.hp / 100), 6);
 
-    // Body
-    ctx.fillStyle = color;
-    ctx.fillRect(x - TANK_W / 2, y - TANK_H, TANK_W, TANK_H);
-    // Tracks
-    ctx.fillStyle = "rgba(0,0,0,0.35)";
-    ctx.fillRect(x - TANK_W / 2 - 3, y - 6, TANK_W + 6, 6);
+    // Contact shadow.
+    ctx.fillStyle = "rgba(0,0,0,0.3)";
+    ctx.beginPath();
+    ctx.ellipse(x, y + 2, TANK_W / 2 + 6, 4, 0, 0, Math.PI * 2);
+    ctx.fill();
 
-    // Turret + barrel
+    // Tracks: a dark rounded band wider than the hull, with road wheels and
+    // a lighter top run for a sense of tension/roundness.
+    const trackW = TANK_W + 8;
+    const trackH = 9;
+    const trackX = x - trackW / 2;
+    const trackY = y - trackH;
+    ctx.fillStyle = "#1c1c1c";
+    roundRect(trackX, trackY, trackW, trackH, 4);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,0.12)";
+    ctx.fillRect(trackX + 2, trackY + 1.5, trackW - 4, 1.5);
+    ctx.fillStyle = "#3a3a3a";
+    const wheelCount = 4;
+    for (let i = 0; i < wheelCount; i++) {
+      const wx = trackX + trackW * ((i + 0.5) / wheelCount);
+      ctx.beginPath();
+      ctx.arc(wx, trackY + trackH / 2, trackH / 2 - 1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Hull: an asymmetric trapezoid with a sloped glacis plate facing the
+    // direction the tank is pointed, shaded with a top-down gradient.
+    const hullY = trackY;
+    const hullTop = hullY - TANK_H;
+    const frontX = x + (dir * TANK_W) / 2;
+    const rearX = x - (dir * TANK_W) / 2;
+    const slopeInset = dir * 10;
+    ctx.beginPath();
+    ctx.moveTo(rearX, hullY);
+    ctx.lineTo(rearX, hullTop);
+    ctx.lineTo(frontX - slopeInset, hullTop);
+    ctx.lineTo(frontX, hullTop + TANK_H * 0.55);
+    ctx.lineTo(frontX, hullY);
+    ctx.closePath();
+    const hullGrad = ctx.createLinearGradient(0, hullTop, 0, hullY);
+    hullGrad.addColorStop(0, light);
+    hullGrad.addColorStop(0.55, color);
+    hullGrad.addColorStop(1, dark);
+    ctx.fillStyle = hullGrad;
+    ctx.fill();
+    ctx.strokeStyle = darker;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Hatch.
+    ctx.fillStyle = darker;
+    ctx.beginPath();
+    ctx.arc(x - dir * 6, hullTop + TANK_H * 0.4, 3.2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Turret + barrel, both rotated around the pivot to point at the aim angle.
     const isCurrent = tanks[currentTurn] === tank && turnState === "aiming" && !tank.isAI;
     let angleRad;
     if (isCurrent && dragging) {
       angleRad = Math.atan2(dragPos.y - (y - TANK_H), dragPos.x - x);
     } else {
-      const dir = facingSign(tank);
       angleRad = Math.atan2(-Math.sin((tank.angle * Math.PI) / 180), dir * Math.cos((tank.angle * Math.PI) / 180));
     }
     const pivotX = x;
-    const pivotY = y - TANK_H;
-    ctx.fillStyle = color;
+    const pivotY = hullTop;
+
+    ctx.save();
+    ctx.translate(pivotX, pivotY);
+    ctx.rotate(angleRad);
+    ctx.fillStyle = dark;
+    ctx.fillRect(0, -3.2, BARREL_LEN, 6.4);
+    ctx.fillStyle = "rgba(255,255,255,0.25)";
+    ctx.fillRect(2, -3.2, BARREL_LEN - 4, 1.4);
+    ctx.fillStyle = darker;
+    ctx.fillRect(BARREL_LEN - 4, -4.2, 4, 8.4);
+    ctx.restore();
+
+    // Antenna.
+    ctx.strokeStyle = darker;
+    ctx.lineWidth = 1.2;
     ctx.beginPath();
-    ctx.arc(pivotX, pivotY, 9, 0, Math.PI * 2);
+    ctx.moveTo(pivotX - dir * 6, pivotY - 4);
+    ctx.quadraticCurveTo(pivotX - dir * 14, pivotY - 16, pivotX - dir * 10, pivotY - 26);
+    ctx.stroke();
+
+    const turretGrad = ctx.createRadialGradient(
+      pivotX - dir * 3,
+      pivotY - 3,
+      1,
+      pivotX,
+      pivotY,
+      11
+    );
+    turretGrad.addColorStop(0, light);
+    turretGrad.addColorStop(1, dark);
+    ctx.fillStyle = turretGrad;
+    ctx.beginPath();
+    ctx.arc(pivotX, pivotY, 9.5, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = "#222";
-    ctx.lineWidth = 6;
-    ctx.beginPath();
-    ctx.moveTo(pivotX, pivotY);
-    ctx.lineTo(pivotX + Math.cos(angleRad) * BARREL_LEN, pivotY + Math.sin(angleRad) * BARREL_LEN);
+    ctx.strokeStyle = darker;
+    ctx.lineWidth = 1.2;
     ctx.stroke();
 
     // Label
@@ -647,6 +846,16 @@
     ctx.font = "12px Trebuchet MS";
     ctx.textAlign = "center";
     ctx.fillText(tank.label, x, y - TANK_H - 26);
+  }
+
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
   }
 
   function drawAimPreview() {
