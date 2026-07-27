@@ -82,6 +82,8 @@
   let clouds = [];
   let rocks = [];
   let birds = [];
+  let strata = { p1: 0, p2: 0, p3: 0 };
+  let grassTufts = [];
   let tanks = []; // [player1, player2]
   let currentTurn = 0; // index into tanks
   let wind = 0;
@@ -110,39 +112,58 @@
   }
 
   // ---------------------------------------------------------------------
-  // Terrain generation (sum of smooth sine waves -> continuous heightmap)
+  // Terrain generation: midpoint displacement (1D fractal), the classic
+  // technique for natural, non-repeating hill lines with detail at every
+  // scale -- unlike stacked sine waves, it doesn't look like a wave.
   // ---------------------------------------------------------------------
-  function generateTerrain() {
-    const baseY = H * 0.62;
-    const waves = [
-      { amp: rand(20, 45), freq: rand(0.004, 0.008), phase: rand(0, Math.PI * 2) },
-      { amp: rand(10, 25), freq: rand(0.01, 0.02), phase: rand(0, Math.PI * 2) },
-      { amp: rand(4, 10), freq: rand(0.03, 0.05), phase: rand(0, Math.PI * 2) },
-    ];
-    const t = new Array(W + 1);
-    for (let x = 0; x <= W; x++) {
-      let y = baseY;
-      for (const w of waves) y += w.amp * Math.sin(x * w.freq + w.phase);
-      t[x] = y;
+  function generateFractalHeights(baseY, initialRange, persistence, minY, maxY) {
+    const size = 256;
+    const arr = new Array(size + 1);
+    arr[0] = baseY + rand(-initialRange, initialRange);
+    arr[size] = baseY + rand(-initialRange, initialRange);
+    let range = initialRange;
+    let step = size;
+    while (step > 1) {
+      const half = step / 2;
+      for (let i = half; i < size; i += step) {
+        const avg = (arr[i - half] + arr[i + half]) / 2;
+        arr[i] = avg + rand(-range, range);
+      }
+      range *= persistence;
+      step = half;
     }
-    return t;
+    const out = new Array(W + 1);
+    for (let x = 0; x <= W; x++) {
+      const pos = (x / W) * size;
+      const i0 = Math.floor(pos);
+      const i1 = Math.min(size, i0 + 1);
+      const frac = pos - i0;
+      const y = arr[i0] * (1 - frac) + arr[i1] * frac;
+      out[x] = Math.max(minY, Math.min(maxY, y));
+    }
+    return out;
+  }
+
+  function generateTerrain() {
+    return generateFractalHeights(H * 0.6, 75, 0.54, 140, H - 55);
   }
 
   // A second, hazier heightmap sitting above and behind the real terrain,
   // purely decorative, to give the horizon some parallax depth.
   function generateMountains() {
-    const baseY = H * 0.42;
-    const waves = [
-      { amp: rand(30, 55), freq: rand(0.002, 0.004), phase: rand(0, Math.PI * 2) },
-      { amp: rand(10, 20), freq: rand(0.006, 0.012), phase: rand(0, Math.PI * 2) },
-    ];
-    const m = new Array(W + 1);
-    for (let x = 0; x <= W; x++) {
-      let y = baseY;
-      for (const w of waves) y += w.amp * Math.sin(x * w.freq + w.phase);
-      m[x] = y;
+    return generateFractalHeights(H * 0.4, 50, 0.6, 40, H * 0.62);
+  }
+
+  function generateStrata() {
+    return { p1: rand(0, Math.PI * 2), p2: rand(0, Math.PI * 2), p3: rand(0, Math.PI * 2) };
+  }
+
+  function generateGrassTufts() {
+    const tufts = [];
+    for (let x = 3; x <= W; x += rand(5, 9)) {
+      tufts.push({ x, h: rand(5, 12), lean: rand(-3, 3), shade: rand(-12, 14) });
     }
-    return m;
+    return tufts;
   }
 
   function generateClouds() {
@@ -170,13 +191,11 @@
 
   function generateRocks() {
     const rocks = [];
-    for (let i = 0; i < 90; i++) {
-      rocks.push({
-        x: rand(0, W),
-        depth: rand(6, 220),
-        r: rand(1.5, 4.5),
-        shade: rand(-18, 14),
-      });
+    for (let i = 0; i < 70; i++) {
+      rocks.push({ x: rand(0, W), depth: rand(6, 260), r: rand(1.5, 4), shade: rand(-14, 10) });
+    }
+    for (let i = 0; i < 7; i++) {
+      rocks.push({ x: rand(0, W), depth: rand(40, 260), r: rand(7, 13), shade: rand(-10, 8), boulder: true });
     }
     return rocks;
   }
@@ -186,13 +205,18 @@
     return terrain[xi];
   }
 
+  // Crater rims get a torn, irregular edge (two overlaid sine terms with a
+  // per-explosion seed) instead of a perfect circular arc.
   function carveCrater(cx, cy, radius) {
     const r = radius;
-    const from = Math.max(0, Math.floor(cx - r));
-    const to = Math.min(W, Math.ceil(cx + r));
+    const from = Math.max(0, Math.floor(cx - r * 1.15));
+    const to = Math.min(W, Math.ceil(cx + r * 1.15));
+    const seed = rand(0, Math.PI * 2);
     for (let x = from; x <= to; x++) {
       const dx = x - cx;
-      const inside = r * r - dx * dx;
+      const jag = 1 + 0.12 * Math.sin(x * 0.35 + seed) + 0.06 * Math.sin(x * 0.9 + seed * 2);
+      const rr = r * jag;
+      const inside = rr * rr - dx * dx;
       if (inside <= 0) continue;
       const depth = cy + Math.sqrt(inside);
       if (depth > terrain[x]) terrain[x] = Math.min(H - 6, depth);
@@ -248,6 +272,8 @@
     clouds = generateClouds();
     rocks = generateRocks();
     birds = generateBirds();
+    strata = generateStrata();
+    grassTufts = generateGrassTufts();
     const p1 = makeTank("left", "Player 1", "#e63946", false);
     const p2 =
       mode === "ai"
@@ -712,33 +738,89 @@
     ctx.closePath();
   }
 
-  function drawTerrain() {
-    terrainPath();
-    const dirt = ctx.createLinearGradient(0, H * 0.4, 0, H);
-    dirt.addColorStop(0, "#8a5a34");
-    dirt.addColorStop(0.35, "#6b4423");
-    dirt.addColorStop(1, "#432711");
-    ctx.fillStyle = dirt;
-    ctx.fill();
+  // Absolute-canvas-Y band boundaries (not relative to the local surface),
+  // so a valley exposes deeper strata immediately while a hilltop shows a
+  // thick topsoil layer -- the way a real cross-section works. Each
+  // boundary gets a gentle per-x wiggle so the layers read as folded rock
+  // rather than perfectly flat lines.
+  function stratumBoundary1(x) {
+    return H * 0.72 + 14 * Math.sin(x * 0.015 + strata.p1);
+  }
+  function stratumBoundary2(x) {
+    return H * 0.84 + 10 * Math.sin(x * 0.012 + strata.p2);
+  }
+  function stratumBoundary3(x) {
+    return H * 0.93 + 8 * Math.sin(x * 0.02 + strata.p3);
+  }
 
+  const STRATUM_COLORS = ["#5c3a21", "#7a5433", "#6e6558", "#2b2019"];
+
+  function stratumColorAt(x, y) {
+    if (y < stratumBoundary1(x)) return STRATUM_COLORS[0];
+    if (y < stratumBoundary2(x)) return STRATUM_COLORS[1];
+    if (y < stratumBoundary3(x)) return STRATUM_COLORS[2];
+    return STRATUM_COLORS[3];
+  }
+
+  function stratumPath(topFn, bottomFn) {
+    ctx.beginPath();
+    ctx.moveTo(0, topFn(0));
+    for (let x = 0; x <= W; x += 4) ctx.lineTo(x, topFn(x));
+    for (let x = W; x >= 0; x -= 4) ctx.lineTo(x, bottomFn(x));
+    ctx.closePath();
+  }
+
+  function drawTerrain() {
     ctx.save();
     terrainPath();
     ctx.clip();
 
-    // Scattered rock/pebble speckles embedded in the dirt for texture.
+    // Layered soil/rock cross-section, each band an absolute-height slab so
+    // valleys naturally cut into deeper layers than hilltops do.
+    stratumPath(() => -50, stratumBoundary1);
+    ctx.fillStyle = STRATUM_COLORS[0];
+    ctx.fill();
+    stratumPath(stratumBoundary1, stratumBoundary2);
+    ctx.fillStyle = STRATUM_COLORS[1];
+    ctx.fill();
+    stratumPath(stratumBoundary2, stratumBoundary3);
+    ctx.fillStyle = STRATUM_COLORS[2];
+    ctx.fill();
+    stratumPath(stratumBoundary3, () => H + 10);
+    ctx.fillStyle = STRATUM_COLORS[3];
+    ctx.fill();
+
+    ctx.strokeStyle = "rgba(0,0,0,0.25)";
+    ctx.lineWidth = 1.5;
+    for (const b of [stratumBoundary1, stratumBoundary2, stratumBoundary3]) {
+      ctx.beginPath();
+      ctx.moveTo(0, b(0));
+      for (let x = 0; x <= W; x += 8) ctx.lineTo(x, b(x));
+      ctx.stroke();
+    }
+
+    // Scattered rock/pebble speckles (and a few larger boulders) embedded
+    // in whichever layer they happen to sit in.
     for (const rk of rocks) {
       const y = terrainAt(rk.x) + rk.depth;
       if (y > H - 2) continue;
-      ctx.fillStyle = shadeColor("#6b4423", rk.shade);
+      ctx.fillStyle = shadeColor(stratumColorAt(rk.x, y), rk.shade);
       ctx.beginPath();
       ctx.ellipse(rk.x, y, rk.r, rk.r * 0.7, 0, 0, Math.PI * 2);
       ctx.fill();
+      if (rk.boulder) {
+        ctx.strokeStyle = "rgba(255,255,255,0.15)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.ellipse(rk.x - rk.r * 0.3, y - rk.r * 0.3, rk.r * 0.5, rk.r * 0.3, 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
 
     // Grass cap: stroke the surface line with a thick green stroke while
     // clipped to the terrain shape, so only the half below the surface
     // shows, giving a consistent-thickness grass band regardless of hill
-    // height, then add short tufts for a less flat silhouette.
+    // height, then add organic tufts for a less flat silhouette.
     ctx.beginPath();
     ctx.moveTo(0, terrain[0]);
     for (let x = 0; x <= W; x += 2) ctx.lineTo(x, terrain[x]);
@@ -750,16 +832,15 @@
     ctx.lineJoin = "round";
     ctx.stroke();
 
-    ctx.strokeStyle = "#7cb95a";
     ctx.lineWidth = 2;
-    for (let x = 4; x <= W; x += 9) {
-      const ty = terrainAt(x);
-      const tuftH = 5 + ((x * 37) % 5);
+    for (const tuft of grassTufts) {
+      const ty = terrainAt(tuft.x) - 8;
+      ctx.strokeStyle = shadeColor("#7cb95a", tuft.shade);
       ctx.beginPath();
-      ctx.moveTo(x, ty - 8);
-      ctx.lineTo(x - 2, ty - 8 - tuftH);
-      ctx.moveTo(x, ty - 8);
-      ctx.lineTo(x + 2, ty - 8 - tuftH * 0.7);
+      ctx.moveTo(tuft.x, ty);
+      ctx.lineTo(tuft.x - 2 + tuft.lean, ty - tuft.h);
+      ctx.moveTo(tuft.x, ty);
+      ctx.lineTo(tuft.x + 2 + tuft.lean, ty - tuft.h * 0.7);
       ctx.stroke();
     }
     ctx.restore();
