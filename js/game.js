@@ -97,6 +97,8 @@
   let wins = [0, 0];
   let aiTimer = 0;
   let roundOver = false;
+  let shakeTime = 0;
+  let shakeMag = 0;
 
   function rand(min, max) {
     return min + Math.random() * (max - min);
@@ -289,6 +291,8 @@
     roundOver = false;
     dragging = false;
     aiTimer = 0;
+    shakeTime = 0;
+    shakeMag = 0;
     updateWeaponUI();
     updateHud();
     hideOverlay();
@@ -497,8 +501,55 @@
         tank.hp = Math.max(0, tank.hp - weapon.damage * falloff);
       }
     }
-    particles.push({ x, y, r: 4, maxR: weapon.blastRadius * 1.3, life: 1 });
+    spawnExplosion(x, y, weapon);
     for (const tank of tanks) settleTankToTerrain(tank);
+  }
+
+  // A layered burst -- flash, fireball, shockwave ring, drifting smoke, and
+  // flying dirt debris -- scaled by the weapon's blast radius, plus a bit
+  // of screen shake for impact.
+  function spawnExplosion(x, y, weapon) {
+    const scale = weapon.blastRadius / 36;
+
+    particles.push({ type: "flash", x, y, life: 1, decay: 0.22, maxR: weapon.blastRadius * 0.85 });
+    particles.push({ type: "fire", x, y, life: 1, decay: 0.07, maxR: weapon.blastRadius * 1.05 });
+    particles.push({ type: "ring", x, y, life: 1, decay: 0.06, maxR: weapon.blastRadius * 1.9 });
+
+    const smokeCount = Math.round(rand(4, 6) * scale);
+    for (let i = 0; i < smokeCount; i++) {
+      particles.push({
+        type: "smoke",
+        x: x + rand(-8, 8) * scale,
+        y: y + rand(-4, 4) * scale,
+        vx: rand(-0.4, 0.4),
+        vy: rand(-0.9, -0.4),
+        r0: rand(4, 8) * scale,
+        grow: rand(10, 18) * scale,
+        life: 1,
+        decay: rand(0.012, 0.02),
+      });
+    }
+
+    const debrisCount = Math.round(rand(7, 11) * scale);
+    for (let i = 0; i < debrisCount; i++) {
+      const ang = rand(-Math.PI * 0.95, -Math.PI * 0.05);
+      const speed = rand(2, 6) * Math.min(1.6, scale + 0.3);
+      particles.push({
+        type: "debris",
+        x,
+        y,
+        vx: Math.cos(ang) * speed,
+        vy: Math.sin(ang) * speed,
+        size: rand(1.5, 4),
+        rot: rand(0, Math.PI * 2),
+        vrot: rand(-0.3, 0.3),
+        life: 1,
+        decay: rand(0.014, 0.024),
+      });
+    }
+
+    shakeTime = Math.max(shakeTime, 0.35 + scale * 0.15);
+    shakeMag = Math.max(shakeMag, Math.min(10, 3 + weapon.blastRadius * 0.1));
   }
 
   // ---------------------------------------------------------------------
@@ -576,10 +627,24 @@
 
   function updateParticles(dt) {
     for (const p of particles) {
-      p.life -= dt * 0.06;
-      p.r = p.maxR * (1 - Math.max(0, p.life));
+      if (p.type === "smoke") {
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.vy -= 0.01 * dt;
+      } else if (p.type === "debris") {
+        p.vy += GRAVITY * 0.5 * dt;
+        p.x += p.vx * dt;
+        p.y += p.vy * dt;
+        p.rot += p.vrot * dt;
+      }
+      p.life -= p.decay * dt;
     }
     particles = particles.filter((p) => p.life > 0);
+
+    if (shakeTime > 0) {
+      shakeTime = Math.max(0, shakeTime - dt * 0.04);
+      if (shakeTime === 0) shakeMag = 0;
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -1154,12 +1219,68 @@
   }
 
   function drawParticles() {
+    // Smoke first so the fireball/flash read as on top of it, debris and
+    // rings drawn last so they read crisply over everything else.
     for (const p of particles) {
-      const alpha = Math.max(0, p.life);
-      ctx.fillStyle = `rgba(255,150,60,${alpha})`;
+      if (p.type !== "smoke") continue;
+      const alpha = Math.max(0, p.life) * 0.45;
+      const r = p.r0 + p.grow * (1 - p.life);
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+      g.addColorStop(0, `rgba(90,90,90,${alpha})`);
+      g.addColorStop(1, `rgba(90,90,90,0)`);
+      ctx.fillStyle = g;
       ctx.beginPath();
-      ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
       ctx.fill();
+    }
+
+    for (const p of particles) {
+      if (p.type !== "fire") continue;
+      const alpha = Math.max(0, p.life);
+      const r = p.maxR * (0.35 + 0.65 * (1 - p.life));
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+      g.addColorStop(0, `rgba(255,241,189,${alpha})`);
+      g.addColorStop(0.35, `rgba(255,160,60,${alpha * 0.9})`);
+      g.addColorStop(0.7, `rgba(210,60,30,${alpha * 0.6})`);
+      g.addColorStop(1, "rgba(120,30,20,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    for (const p of particles) {
+      if (p.type !== "flash") continue;
+      const alpha = Math.max(0, p.life);
+      const r = p.maxR * (1 - p.life * 0.4);
+      const g = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, r);
+      g.addColorStop(0, `rgba(255,255,255,${alpha})`);
+      g.addColorStop(1, "rgba(255,255,255,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    for (const p of particles) {
+      if (p.type !== "debris") continue;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.fillStyle = `rgba(70,45,25,${Math.max(0, p.life)})`;
+      ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+      ctx.restore();
+    }
+
+    for (const p of particles) {
+      if (p.type !== "ring") continue;
+      const alpha = Math.max(0, p.life);
+      const r = p.maxR * (1 - p.life);
+      ctx.strokeStyle = `rgba(255,220,160,${alpha * 0.8})`;
+      ctx.lineWidth = 2.5 * p.life + 0.5;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.stroke();
     }
   }
 
@@ -1187,6 +1308,13 @@
   function render() {
     ctx.clearRect(0, 0, W, H);
     if (!mode) return;
+
+    ctx.save();
+    if (shakeTime > 0) {
+      const mag = shakeMag * Math.min(1, shakeTime / 0.3);
+      ctx.translate(rand(-mag, mag), rand(-mag, mag));
+    }
+
     drawBackground();
     drawTerrain();
     drawWindArrow();
@@ -1194,6 +1322,7 @@
     drawAimPreview();
     drawProjectiles();
     drawParticles();
+    ctx.restore();
   }
 
   // ---------------------------------------------------------------------
