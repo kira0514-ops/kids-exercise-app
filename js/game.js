@@ -213,9 +213,9 @@
   // The pinned-down squad waiting at the LZ in Rescue Mission mode.
   function generateTroops() {
     return [
-      { x: TROOPS_X - 12, rescued: false },
-      { x: TROOPS_X, rescued: false },
-      { x: TROOPS_X + 12, rescued: false },
+      { x: TROOPS_X - 12, rescued: false, alive: true },
+      { x: TROOPS_X, rescued: false, alive: true },
+      { x: TROOPS_X + 12, rescued: false, alive: true },
     ];
   }
 
@@ -441,6 +441,27 @@
     }
   }
 
+  // A wall or roof block falling with real force can come down on one of
+  // the troops -- carelessly blowing out the whole bunker at once risks
+  // the squad you're trying to save, so breaching it takes some care.
+  function resolveBlockTroop(b) {
+    const bA = blockAABB(b);
+    for (const troop of troops) {
+      if (!troop.alive || troop.rescued) continue;
+      const groundY = terrainAt(troop.x);
+      const tTop = groundY - 24;
+      const tBottom = groundY + 2;
+      const tLeft = troop.x - 5;
+      const tRight = troop.x + 5;
+      const overlap = bA.minX < tRight && bA.maxX > tLeft && bA.minY < tBottom && bA.maxY > tTop;
+      if (!overlap) continue;
+      const speed = Math.hypot(b.vx, b.vy);
+      if (speed > 3) {
+        troop.alive = false;
+      }
+    }
+  }
+
   // Approximate OBB-vs-OBB collision via each block's axis-aligned bounding
   // box (a rotated block's box grows with its tilt, which reads fine for
   // this purpose) -- resolved along whichever axis has the smaller overlap.
@@ -557,6 +578,7 @@
       b.av = Math.max(-0.85, Math.min(0.85, b.av));
       resolveBlockTerrain(b);
       resolveBlockTank(b);
+      resolveBlockTroop(b);
     }
 
     for (let i = 0; i < blocks.length; i++) {
@@ -892,6 +914,19 @@
         tank.hp = Math.max(0, tank.hp - weapon.damage * falloff);
       }
     }
+    // A blast close enough to breach the wall/roof right next to the
+    // troops can hurt them directly too, on top of anything that
+    // physically falls on them (resolveBlockTroop) -- most direct hits on
+    // an enclosing block destroy it outright rather than sending it
+    // tumbling, so proximity to the blast is the more reliable danger.
+    for (const troop of troops) {
+      if (!troop.alive || troop.rescued) continue;
+      const troopY = terrainAt(troop.x) - 12;
+      const d = Math.hypot(troop.x - x, troopY - y);
+      if (d < weapon.blastRadius + 15) {
+        troop.alive = false;
+      }
+    }
     applyExplosionToBlocks(x, y, weapon);
     spawnExplosion(x, y, weapon);
     for (const tank of tanks) settleTankToTerrain(tank);
@@ -1198,7 +1233,7 @@
     } else if (heli.phase === "extract") {
       heli.extractTimer += dt;
       if (heli.extractTimer > 70) {
-        for (const t of troops) t.rescued = true;
+        for (const t of troops) if (t.alive) t.rescued = true;
         heli.phase = "departing";
         heli.vx = 2.4;
         heli.targetY = 90;
@@ -1210,10 +1245,23 @@
       if (heli.x > W + 70) {
         heli.phase = "done";
         roundOver = true;
-        statusIndicatorEl.textContent = "Mission Complete!";
+        const survivors = troops.filter((t) => t.alive).length;
+        const total = troops.length;
+        let title, msg;
+        if (survivors === total) {
+          title = "Troops Rescued!";
+          msg = `Blew open the bunker and evac'd the squad in ${shotsFired} shot${shotsFired === 1 ? "" : "s"}.`;
+        } else if (survivors > 0) {
+          title = "Squad Extracted -- Losses Taken";
+          msg = `${survivors} of ${total} made it out alive. Falling debris got the rest. ${shotsFired} shot${shotsFired === 1 ? "" : "s"} fired.`;
+        } else {
+          title = "Mission Failed";
+          msg = `The whole squad was lost to falling debris before the chopper could land. ${shotsFired} shot${shotsFired === 1 ? "" : "s"} fired.`;
+        }
+        statusIndicatorEl.textContent = survivors > 0 ? "Mission Complete!" : "Mission Failed";
         showOverlay(
-          "Troops Rescued!",
-          `Blew open the bunker and evac'd the squad in ${shotsFired} shot${shotsFired === 1 ? "" : "s"}.`,
+          title,
+          msg,
           "New Mission"
         );
       }
@@ -1924,6 +1972,23 @@
       if (t.rescued) continue;
       const gx = t.x;
       const gy = terrainAt(t.x);
+
+      if (!t.alive) {
+        // Down but still visible -- a prone silhouette instead of standing.
+        ctx.strokeStyle = "#2f3b26";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(gx - 8, gy - 2);
+        ctx.lineTo(gx + 8, gy - 2);
+        ctx.stroke();
+        ctx.fillStyle = "#4a5c34";
+        ctx.fillRect(gx - 7, gy - 6, 9, 4);
+        ctx.fillStyle = "#d9a066";
+        ctx.beginPath();
+        ctx.arc(gx + 8, gy - 4, 2.6, 0, Math.PI * 2);
+        ctx.fill();
+        continue;
+      }
 
       ctx.strokeStyle = "#2f3b26";
       ctx.lineWidth = 2;

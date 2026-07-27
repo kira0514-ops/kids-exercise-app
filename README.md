@@ -9,7 +9,9 @@ Open `index.html` in any modern browser (or serve the folder with any static
 file server), then pick **2 Player (Hotseat)**, **Vs Computer**, or **Rescue
 Mission (Solo)** — a no-opponent mode where a squad is boxed in by an
 enemy bunker; blast open the sandbag walls and concrete roof surrounding
-them so an evac chopper can fly in and save them.
+them so an evac chopper can fly in and save them. Careless heavy ordinance
+right on top of the squad can hurt them too, so precision matters most on
+the last few blocks directly overhead.
 
 ```
 python3 -m http.server 8000
@@ -58,7 +60,12 @@ sideways every turn. Destroy the other tank before it destroys you.
 - A third, opponent-free Rescue Mission mode: blow open the bunker
   enclosing a pinned-down squad, then watch a scripted evac chopper fly
   in, land, extract the troops, and fly back off before the mission is
-  scored on shots fired.
+  scored on shots fired. The chopper only needs a clear shaft of air
+  directly above the squad to land -- leftover wall rubble elsewhere
+  doesn't hold up the rescue. Blasts close enough to the squad (not just
+  a block physically landing on them) can injure or kill a trooper, so a
+  wide-blast weapon used carelessly near the interior costs you the squad
+  even on an otherwise-successful breach.
 
 ## Files
 
