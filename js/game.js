@@ -23,6 +23,7 @@
   const BLOCK_RESTITUTION = 0.3;
   const BLOCK_SLEEP_SPEED = 0.4;
   const BLOCK_SLEEP_FRAMES = 18;
+  const TROOPS_X = W - 45;
 
   const hud = document.getElementById("hud");
   const turnIndicatorEl = document.getElementById("turn-indicator");
@@ -30,6 +31,7 @@
   const winsIndicatorEl = document.getElementById("wins-indicator");
   const blocksIndicatorEl = document.getElementById("blocks-indicator");
   const shotsIndicatorEl = document.getElementById("shots-indicator");
+  const statusIndicatorEl = document.getElementById("status-indicator");
   const restartBtn = document.getElementById("restart-btn");
   const modeSelect = document.getElementById("mode-select");
   const overlay = document.getElementById("overlay");
@@ -109,6 +111,8 @@
   let aiTimer = 0;
   let roundOver = false;
   let shotsFired = 0;
+  let troops = [];
+  let heli = null;
   let shakeTime = 0;
   let shakeMag = 0;
 
@@ -201,6 +205,15 @@
       birds.push({ x: rand(0, W), y: rand(90, 220) });
     }
     return birds;
+  }
+
+  // The pinned-down squad waiting at the LZ in Rescue Mission mode.
+  function generateTroops() {
+    return [
+      { x: TROOPS_X - 12, rescued: false },
+      { x: TROOPS_X, rescued: false },
+      { x: TROOPS_X + 12, rescued: false },
+    ];
   }
 
   function generateRocks() {
@@ -582,7 +595,10 @@
         ...makeBlockStack(W * 0.85, [5, 4, 3, 2, 1]),
       ];
       shotsFired = 0;
-      restartBtn.textContent = "New Structure";
+      troops = generateTroops();
+      heli = null;
+      statusIndicatorEl.textContent = "Clear the LZ";
+      restartBtn.textContent = "New Mission";
     } else {
       const p2 =
         mode === "ai"
@@ -590,6 +606,8 @@
           : makeTank("right", "Player 2", "#457b9d", false);
       tanks = [p1, p2];
       blocks = [...makeBlockStack(p1.x + 100, [4, 3, 2, 1]), ...makeBlockStack(p2.x - 100, [4, 3, 2, 1])];
+      troops = [];
+      heli = null;
       restartBtn.textContent = "New Battle";
     }
 
@@ -1044,12 +1062,12 @@
       if (projectiles.length === 0) {
         if (mode === "demolition") {
           if (blocks.length === 0) {
-            roundOver = true;
-            showOverlay(
-              "Structure Demolished!",
-              `Cleared it in ${shotsFired} shot${shotsFired === 1 ? "" : "s"}.`,
-              "New Structure"
-            );
+            if (!heli) {
+              turnState = "cutscene";
+              heli = { x: W + 70, y: 90, vx: -2.4, targetY: 90, phase: "inbound", extractTimer: 0 };
+              statusIndicatorEl.textContent = "Chopper inbound...";
+              updateHud();
+            }
           } else {
             turnState = "aiming";
             wind = Math.round(rand(-25, 25));
@@ -1081,6 +1099,54 @@
 
     updateBlocks(dt);
     updateParticles(dt);
+    updateMission(dt);
+  }
+
+  // ---------------------------------------------------------------------
+  // Rescue Mission: once the LZ is clear, a scripted chopper flies in from
+  // the right, lands by the troops, extracts them, then flies back off --
+  // only then does the round actually end.
+  // ---------------------------------------------------------------------
+  function updateMission(dt) {
+    if (!heli) return;
+    if (heli.phase === "inbound") {
+      heli.x += heli.vx * dt;
+      if (heli.x <= TROOPS_X + 4) {
+        heli.phase = "landing";
+        heli.targetY = terrainAt(TROOPS_X) - 34;
+        statusIndicatorEl.textContent = "Touching down...";
+      }
+    } else if (heli.phase === "landing") {
+      heli.y += (heli.targetY - heli.y) * 0.08 * dt;
+      if (Math.abs(heli.y - heli.targetY) < 1) {
+        heli.y = heli.targetY;
+        heli.phase = "extract";
+        heli.extractTimer = 0;
+        statusIndicatorEl.textContent = "Extracting troops...";
+      }
+    } else if (heli.phase === "extract") {
+      heli.extractTimer += dt;
+      if (heli.extractTimer > 70) {
+        for (const t of troops) t.rescued = true;
+        heli.phase = "departing";
+        heli.vx = 2.4;
+        heli.targetY = 90;
+        statusIndicatorEl.textContent = "Evac in progress...";
+      }
+    } else if (heli.phase === "departing") {
+      heli.y += (heli.targetY - heli.y) * 0.06 * dt;
+      heli.x += heli.vx * dt;
+      if (heli.x > W + 70) {
+        heli.phase = "done";
+        roundOver = true;
+        statusIndicatorEl.textContent = "Mission Complete!";
+        showOverlay(
+          "Troops Rescued!",
+          `Cleared the LZ and evac'd the squad in ${shotsFired} shot${shotsFired === 1 ? "" : "s"}.`,
+          "New Mission"
+        );
+      }
+    }
   }
 
   // ---------------------------------------------------------------------
@@ -1710,6 +1776,116 @@
     }
   }
 
+  function drawTroops() {
+    for (const t of troops) {
+      if (t.rescued) continue;
+      const gx = t.x;
+      const gy = terrainAt(t.x);
+
+      ctx.strokeStyle = "#2f3b26";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(gx - 2, gy - 2);
+      ctx.lineTo(gx - 3, gy - 10);
+      ctx.moveTo(gx + 2, gy - 2);
+      ctx.lineTo(gx + 3, gy - 10);
+      ctx.stroke();
+
+      ctx.fillStyle = "#4a5c34";
+      ctx.fillRect(gx - 3, gy - 18, 6, 9);
+
+      ctx.strokeStyle = "#4a5c34";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(gx + 3, gy - 16);
+      ctx.lineTo(gx + 7, gy - 22);
+      ctx.stroke();
+
+      ctx.fillStyle = "#d9a066";
+      ctx.beginPath();
+      ctx.arc(gx, gy - 21, 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = "#3d4a2a";
+      ctx.beginPath();
+      ctx.arc(gx, gy - 22, 3.3, Math.PI, 0);
+      ctx.fill();
+    }
+  }
+
+  function drawHeli() {
+    if (!heli) return;
+    ctx.save();
+    ctx.translate(heli.x, heli.y);
+
+    ctx.strokeStyle = "#5a6b78";
+    ctx.lineWidth = 5;
+    ctx.beginPath();
+    ctx.moveTo(-8, 0);
+    ctx.lineTo(-34, -6);
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(120,130,140,0.6)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(-34, -13);
+    ctx.lineTo(-34, 1);
+    ctx.stroke();
+
+    const bodyGrad = ctx.createLinearGradient(0, -10, 0, 10);
+    bodyGrad.addColorStop(0, "#7d8f9c");
+    bodyGrad.addColorStop(1, "#4d5c68");
+    ctx.fillStyle = bodyGrad;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 20, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "#33404a";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(180,220,235,0.75)";
+    ctx.beginPath();
+    ctx.ellipse(11, -2, 7, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = "#2c343b";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-12, 11);
+    ctx.lineTo(14, 11);
+    ctx.moveTo(-8, 9);
+    ctx.lineTo(-8, 13);
+    ctx.moveTo(9, 9);
+    ctx.lineTo(9, 13);
+    ctx.stroke();
+
+    ctx.strokeStyle = "#33404a";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, -9);
+    ctx.lineTo(0, -12);
+    ctx.stroke();
+
+    const spin = (performance.now() / 40) % Math.PI;
+    ctx.strokeStyle = "rgba(40,45,50,0.5)";
+    ctx.lineWidth = 2;
+    ctx.save();
+    ctx.translate(0, -12);
+    ctx.rotate(spin);
+    ctx.beginPath();
+    ctx.moveTo(-30, 0);
+    ctx.lineTo(30, 0);
+    ctx.stroke();
+    ctx.rotate(Math.PI / 2);
+    ctx.beginPath();
+    ctx.moveTo(-30, 0);
+    ctx.lineTo(30, 0);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.restore();
+  }
+
   function render() {
     ctx.clearRect(0, 0, W, H);
     if (!mode) return;
@@ -1723,11 +1899,13 @@
     drawBackground();
     drawTerrain();
     drawWindArrow();
+    drawTroops();
     for (const tank of tanks) drawTank(tank);
     drawBlocks();
     drawAimPreview();
     drawProjectiles();
     drawParticles();
+    drawHeli();
     ctx.restore();
   }
 
