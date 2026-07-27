@@ -17,6 +17,12 @@
   const TANK_H = 20;
   const BARREL_LEN = 32;
 
+  const BLOCK_W = 26;
+  const BLOCK_H = 20;
+  const BLOCK_RESTITUTION = 0.22;
+  const BLOCK_SLEEP_SPEED = 0.4;
+  const BLOCK_SLEEP_FRAMES = 18;
+
   const turnIndicatorEl = document.getElementById("turn-indicator");
   const windIndicatorEl = document.getElementById("wind-indicator");
   const winsIndicatorEl = document.getElementById("wins-indicator");
@@ -84,6 +90,7 @@
   let birds = [];
   let strata = { p1: 0, p2: 0, p3: 0 };
   let grassTufts = [];
+  let blocks = [];
   let tanks = []; // [player1, player2]
   let currentTurn = 0; // index into tanks
   let wind = 0;
@@ -266,6 +273,261 @@
   }
 
   // ---------------------------------------------------------------------
+  // Blocks: destructible crate structures with lightweight rigid-body-ish
+  // physics -- gravity, rotation, collision with terrain/other blocks/tanks,
+  // and a sleep/wake cycle so settled stacks stop needing simulation.
+  // ---------------------------------------------------------------------
+  function makeBlock(x, y) {
+    return {
+      x,
+      y,
+      w: BLOCK_W,
+      h: BLOCK_H,
+      angle: 0,
+      vx: 0,
+      vy: 0,
+      av: 0,
+      hp: 40,
+      maxHp: 40,
+      awake: false,
+      settleTimer: 0,
+    };
+  }
+
+  // A small pyramid of crates (3-2-1) resting on the terrain at centerX.
+  function makeBlockStack(centerX) {
+    const rows = [3, 2, 1];
+    const stack = [];
+    let rowBottom = terrainAt(centerX);
+    for (const count of rows) {
+      const rowCenterY = rowBottom - BLOCK_H / 2;
+      const totalW = count * BLOCK_W;
+      const startX = centerX - totalW / 2 + BLOCK_W / 2;
+      for (let i = 0; i < count; i++) {
+        stack.push(makeBlock(startX + i * BLOCK_W, rowCenterY));
+      }
+      rowBottom -= BLOCK_H;
+    }
+    return stack;
+  }
+
+  function blockCorners(b) {
+    const hw = b.w / 2;
+    const hh = b.h / 2;
+    const cos = Math.cos(b.angle);
+    const sin = Math.sin(b.angle);
+    const local = [
+      [-hw, -hh],
+      [hw, -hh],
+      [hw, hh],
+      [-hw, hh],
+    ];
+    return local.map(([lx, ly]) => ({ x: b.x + lx * cos - ly * sin, y: b.y + lx * sin + ly * cos }));
+  }
+
+  function blockAABB(b) {
+    const corners = blockCorners(b);
+    const xs = corners.map((p) => p.x);
+    const ys = corners.map((p) => p.y);
+    return { minX: Math.min(...xs), maxX: Math.max(...xs), minY: Math.min(...ys), maxY: Math.max(...ys) };
+  }
+
+  function resolveBlockTerrain(b) {
+    let maxPenetration = -Infinity;
+    let contactX = b.x;
+    for (const c of blockCorners(b)) {
+      const pen = c.y - terrainAt(c.x);
+      if (pen > maxPenetration) {
+        maxPenetration = pen;
+        contactX = c.x;
+      }
+    }
+    if (maxPenetration > 0) {
+      b.y -= maxPenetration;
+      if (b.vy > 0) b.vy = -b.vy * BLOCK_RESTITUTION;
+      b.vx *= 0.85;
+      // Nudge rotation toward whichever side is digging in deepest, so a
+      // block resting off-balance keeps tipping until it lies flat.
+      b.av += (contactX - b.x) * 0.0015;
+      b.av *= 0.9;
+    }
+  }
+
+  function resolveBlockTank(b) {
+    for (const tank of tanks) {
+      if (!tank.alive) continue;
+      const bA = blockAABB(b);
+      const tTop = tank.y - TANK_H - 11;
+      const tBottom = tank.y + 4;
+      const tLeft = tank.x - TANK_W / 2 - 4;
+      const tRight = tank.x + TANK_W / 2 + 4;
+      const overlap = bA.minX < tRight && bA.maxX > tLeft && bA.minY < tBottom && bA.maxY > tTop;
+      if (!overlap) continue;
+      const speed = Math.hypot(b.vx, b.vy);
+      if (speed > 1) tank.hp = Math.max(0, tank.hp - speed * 1.6);
+      if (b.y < tank.y - TANK_H / 2) {
+        b.y = tTop - b.h / 2;
+        b.vy = -Math.abs(b.vy) * 0.2;
+      } else {
+        const dir = b.x < tank.x ? -1 : 1;
+        b.x = tank.x + dir * (TANK_W / 2 + 4 + b.w / 2);
+        b.vx *= -0.3;
+      }
+    }
+  }
+
+  // Approximate OBB-vs-OBB collision via each block's axis-aligned bounding
+  // box (a rotated block's box grows with its tilt, which reads fine for
+  // this purpose) -- resolved along whichever axis has the smaller overlap.
+  function resolveBlockBlock(a, b) {
+    const A = blockAABB(a);
+    const B = blockAABB(b);
+    const overlapX = Math.min(A.maxX, B.maxX) - Math.max(A.minX, B.minX);
+    const overlapY = Math.min(A.maxY, B.maxY) - Math.max(A.minY, B.minY);
+    if (overlapX <= 0 || overlapY <= 0) return;
+
+    const aMovable = a.awake;
+    const bMovable = b.awake;
+    if (!aMovable && !bMovable) return;
+
+    if (overlapX < overlapY) {
+      const dir = a.x < b.x ? -1 : 1;
+      if (aMovable && bMovable) {
+        a.x += (dir * overlapX) / 2;
+        b.x -= (dir * overlapX) / 2;
+      } else if (aMovable) {
+        a.x += dir * overlapX;
+      } else {
+        b.x -= dir * overlapX;
+      }
+      const relVx = a.vx - b.vx;
+      if (aMovable) a.vx -= relVx * 0.5;
+      if (bMovable) b.vx += relVx * 0.5;
+    } else {
+      const dir = a.y < b.y ? -1 : 1;
+      if (aMovable && bMovable) {
+        a.y += (dir * overlapY) / 2;
+        b.y -= (dir * overlapY) / 2;
+      } else if (aMovable) {
+        a.y += dir * overlapY;
+      } else {
+        b.y -= dir * overlapY;
+      }
+      if (dir < 0) {
+        if (aMovable && a.vy > 0) a.vy = 0;
+      } else if (bMovable && b.vy > 0) {
+        b.vy = 0;
+      }
+      if (aMovable) a.vx *= 0.9;
+      if (bMovable) b.vx *= 0.9;
+    }
+
+    const impactForce = Math.abs(a.vx) + Math.abs(a.vy) + Math.abs(b.vx) + Math.abs(b.vy);
+    if (impactForce > 1.2) {
+      a.awake = true;
+      b.awake = true;
+    }
+  }
+
+  function isBlockSupported(b) {
+    const bA = blockAABB(b);
+    if (bA.maxY >= terrainAt(b.x) - 1.5) return true;
+    for (const other of blocks) {
+      if (other === b) continue;
+      const oA = blockAABB(other);
+      const overlapsX = bA.minX < oA.maxX && bA.maxX > oA.minX;
+      const touching = Math.abs(bA.maxY - oA.minY) < 3;
+      if (overlapsX && touching) return true;
+    }
+    return false;
+  }
+
+  function updateBlocks(dt) {
+    for (const b of blocks) {
+      if (!b.awake) continue;
+      b.vy += GRAVITY * dt;
+      b.vx *= 0.995;
+      b.av *= 0.92;
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      b.angle += b.av * dt;
+      b.vx = Math.max(-20, Math.min(20, b.vx));
+      b.vy = Math.max(-20, Math.min(20, b.vy));
+      b.av = Math.max(-0.6, Math.min(0.6, b.av));
+      resolveBlockTerrain(b);
+      resolveBlockTank(b);
+    }
+
+    for (let i = 0; i < blocks.length; i++) {
+      for (let j = i + 1; j < blocks.length; j++) {
+        if (!blocks[i].awake && !blocks[j].awake) continue;
+        resolveBlockBlock(blocks[i], blocks[j]);
+      }
+    }
+
+    for (const b of blocks) {
+      if (b.awake) {
+        const speed = Math.abs(b.vx) + Math.abs(b.vy) + Math.abs(b.av) * 10;
+        if (speed < BLOCK_SLEEP_SPEED) {
+          b.settleTimer += dt;
+          if (b.settleTimer > BLOCK_SLEEP_FRAMES) {
+            b.awake = false;
+            b.vx = 0;
+            b.vy = 0;
+            b.av = 0;
+            b.settleTimer = 0;
+          }
+        } else {
+          b.settleTimer = 0;
+        }
+      } else if (!isBlockSupported(b)) {
+        b.awake = true;
+      }
+    }
+  }
+
+  function spawnBlockDebris(x, y) {
+    for (let i = 0; i < 6; i++) {
+      const ang = rand(-Math.PI, 0);
+      const speed = rand(1, 4);
+      particles.push({
+        type: "debris",
+        x,
+        y,
+        vx: Math.cos(ang) * speed,
+        vy: Math.sin(ang) * speed,
+        size: rand(2, 5),
+        rot: rand(0, Math.PI * 2),
+        vrot: rand(-0.3, 0.3),
+        life: 1,
+        decay: rand(0.014, 0.02),
+        color: "160,110,60",
+      });
+    }
+  }
+
+  function applyExplosionToBlocks(x, y, weapon) {
+    const survivors = [];
+    for (const block of blocks) {
+      const d = Math.hypot(block.x - x, block.y - y);
+      const reach = weapon.blastRadius + Math.max(block.w, block.h) / 2;
+      if (d < reach) {
+        const falloff = Math.max(0, 1 - d / reach);
+        block.hp -= weapon.damage * falloff * 1.4;
+        const ang = Math.atan2(block.y - y, block.x - x);
+        const force = falloff * (weapon.damage / 10);
+        block.vx += Math.cos(ang) * force;
+        block.vy += Math.sin(ang) * force - force * 0.5;
+        block.av += rand(-0.2, 0.2) * falloff;
+        block.awake = true;
+      }
+      if (block.hp > 0) survivors.push(block);
+      else spawnBlockDebris(block.x, block.y);
+    }
+    blocks = survivors;
+  }
+
+  // ---------------------------------------------------------------------
   // Round / battle setup
   // ---------------------------------------------------------------------
   function newBattle() {
@@ -282,6 +544,7 @@
         ? makeTank("right", "CPU", "#457b9d", true)
         : makeTank("right", "Player 2", "#457b9d", false);
     tanks = [p1, p2];
+    blocks = [...makeBlockStack(p1.x + 100), ...makeBlockStack(p2.x - 100)];
     currentTurn = 0;
     wind = Math.round(rand(-25, 25));
     selectedWeapon = "standard";
@@ -501,6 +764,7 @@
         tank.hp = Math.max(0, tank.hp - weapon.damage * falloff);
       }
     }
+    applyExplosionToBlocks(x, y, weapon);
     spawnExplosion(x, y, weapon);
     for (const tank of tanks) settleTankToTerrain(tank);
   }
@@ -607,6 +871,17 @@
             proj.y > tank.y - TANK_H &&
             proj.y < tank.y
           ) {
+            explode(proj.x, proj.y, weapon, proj.owner);
+            exploded = true;
+            break;
+          }
+        }
+        if (exploded) break;
+
+        // Direct block hits
+        for (const block of blocks) {
+          const aabb = blockAABB(block);
+          if (proj.x > aabb.minX && proj.x < aabb.maxX && proj.y > aabb.minY && proj.y < aabb.maxY) {
             explode(proj.x, proj.y, weapon, proj.owner);
             exploded = true;
             break;
@@ -726,6 +1001,7 @@
       }
     }
 
+    updateBlocks(dt);
     updateParticles(dt);
   }
 
@@ -1267,7 +1543,7 @@
       ctx.save();
       ctx.translate(p.x, p.y);
       ctx.rotate(p.rot);
-      ctx.fillStyle = `rgba(70,45,25,${Math.max(0, p.life)})`;
+      ctx.fillStyle = `rgba(${p.color || "70,45,25"},${Math.max(0, p.life)})`;
       ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
       ctx.restore();
     }
@@ -1305,6 +1581,57 @@
     ctx.fill();
   }
 
+  function drawBlocks() {
+    for (const b of blocks) {
+      ctx.save();
+      ctx.translate(b.x, b.y);
+      ctx.rotate(b.angle);
+
+      const dmgRatio = Math.max(0, b.hp / b.maxHp);
+      const base = [150, 102, 58];
+      const shade = base.map((c) => Math.round(c * (0.55 + 0.45 * dmgRatio)));
+      ctx.fillStyle = `rgb(${shade[0]},${shade[1]},${shade[2]})`;
+      ctx.fillRect(-b.w / 2, -b.h / 2, b.w, b.h);
+
+      ctx.strokeStyle = "rgba(0,0,0,0.4)";
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(-b.w / 2, -b.h / 2, b.w, b.h);
+
+      // Plank cross-bracing for a crate look, plus corner nail dots.
+      ctx.strokeStyle = "rgba(0,0,0,0.22)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(-b.w / 2, -b.h / 2);
+      ctx.lineTo(b.w / 2, b.h / 2);
+      ctx.moveTo(b.w / 2, -b.h / 2);
+      ctx.lineTo(-b.w / 2, b.h / 2);
+      ctx.stroke();
+      ctx.fillStyle = "rgba(0,0,0,0.3)";
+      for (const [cx, cy] of [
+        [-b.w / 2 + 3, -b.h / 2 + 3],
+        [b.w / 2 - 3, -b.h / 2 + 3],
+        [-b.w / 2 + 3, b.h / 2 - 3],
+        [b.w / 2 - 3, b.h / 2 - 3],
+      ]) {
+        ctx.beginPath();
+        ctx.arc(cx, cy, 1.2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Crack overlay once it's taken real damage.
+      if (dmgRatio < 0.6) {
+        ctx.strokeStyle = `rgba(20,10,5,${(0.6 - dmgRatio) * 1.2})`;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(-b.w / 4, -b.h / 2);
+        ctx.lineTo(0, 0);
+        ctx.lineTo(b.w / 3, b.h / 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
   function render() {
     ctx.clearRect(0, 0, W, H);
     if (!mode) return;
@@ -1319,6 +1646,7 @@
     drawTerrain();
     drawWindArrow();
     for (const tank of tanks) drawTank(tank);
+    drawBlocks();
     drawAimPreview();
     drawProjectiles();
     drawParticles();
