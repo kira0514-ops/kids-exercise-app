@@ -27,6 +27,9 @@
   const BLOCK_BLAST_DAMAGE_MULT = 1.8;
   const BLOCK_BLAST_REACH_BONUS = 15;
   const TROOPS_X = W - 130;
+  const BUNKER_HALF_WIDTH = 40;
+  const BUNKER_WALL_HEIGHT = 4;
+  const BUNKER_WALL_THICKNESS = 2;
 
   const hud = document.getElementById("hud");
   const turnIndicatorEl = document.getElementById("turn-indicator");
@@ -339,35 +342,45 @@
   // cleared -- a shot has to breach a wall or punch through the roof, not
   // just land somewhere nearby.
   function generateBunker(centerX) {
-    const wallThickness = 2;
-    const wallHeight = 4;
-    const halfWidth = 40;
     const groundY = terrainAt(centerX);
     const blocks = [];
 
     for (let side = -1; side <= 1; side += 2) {
-      for (let col = 0; col < wallThickness; col++) {
-        const bx = centerX + side * (halfWidth + BLOCK_W / 2 + col * BLOCK_W);
-        for (let row = 0; row < wallHeight; row++) {
+      for (let col = 0; col < BUNKER_WALL_THICKNESS; col++) {
+        const bx = centerX + side * (BUNKER_HALF_WIDTH + BLOCK_W / 2 + col * BLOCK_W);
+        for (let row = 0; row < BUNKER_WALL_HEIGHT; row++) {
           const by = groundY - BLOCK_H / 2 - row * BLOCK_H;
           blocks.push(makeBlock(bx, by, "sandbag"));
         }
       }
     }
 
-    const roofLeft = centerX - halfWidth - wallThickness * BLOCK_W;
-    const roofRight = centerX + halfWidth + wallThickness * BLOCK_W;
+    const roofLeft = centerX - BUNKER_HALF_WIDTH - BUNKER_WALL_THICKNESS * BLOCK_W;
+    const roofRight = centerX + BUNKER_HALF_WIDTH + BUNKER_WALL_THICKNESS * BLOCK_W;
     const roofBlockCount = Math.round((roofRight - roofLeft) / BLOCK_W);
     const roofStartX = roofLeft + BLOCK_W / 2;
     const roofRows = 2;
     for (let row = 0; row < roofRows; row++) {
-      const by = groundY - BLOCK_H / 2 - wallHeight * BLOCK_H - row * BLOCK_H;
+      const by = groundY - BLOCK_H / 2 - BUNKER_WALL_HEIGHT * BLOCK_H - row * BLOCK_H;
       for (let i = 0; i < roofBlockCount; i++) {
         blocks.push(makeBlock(roofStartX + i * BLOCK_W, by, "concrete"));
       }
     }
 
     return blocks;
+  }
+
+  // The room's interior air pocket -- inside the walls, under the roof.
+  // While any part of the enclosure is still standing, an explosion
+  // outside this box is absorbed by the structure and can't reach the
+  // troops directly; only a shot that actually gets inside (or debris
+  // that physically falls on them, handled separately) puts them at risk.
+  function isInsideBunker(x, y) {
+    const groundY = terrainAt(TROOPS_X);
+    const left = TROOPS_X - BUNKER_HALF_WIDTH;
+    const right = TROOPS_X + BUNKER_HALF_WIDTH;
+    const top = groundY - BUNKER_WALL_HEIGHT * BLOCK_H;
+    return x > left && x < right && y > top && y < groundY;
   }
 
   function blockCorners(b) {
@@ -437,27 +450,6 @@
         const dir = b.x < tank.x ? -1 : 1;
         b.x = tank.x + dir * (TANK_W / 2 + 4 + b.w / 2);
         b.vx *= -0.3;
-      }
-    }
-  }
-
-  // A wall or roof block falling with real force can come down on one of
-  // the troops -- carelessly blowing out the whole bunker at once risks
-  // the squad you're trying to save, so breaching it takes some care.
-  function resolveBlockTroop(b) {
-    const bA = blockAABB(b);
-    for (const troop of troops) {
-      if (!troop.alive || troop.rescued) continue;
-      const groundY = terrainAt(troop.x);
-      const tTop = groundY - 24;
-      const tBottom = groundY + 2;
-      const tLeft = troop.x - 5;
-      const tRight = troop.x + 5;
-      const overlap = bA.minX < tRight && bA.maxX > tLeft && bA.minY < tBottom && bA.maxY > tTop;
-      if (!overlap) continue;
-      const speed = Math.hypot(b.vx, b.vy);
-      if (speed > 3) {
-        troop.alive = false;
       }
     }
   }
@@ -578,7 +570,6 @@
       b.av = Math.max(-0.85, Math.min(0.85, b.av));
       resolveBlockTerrain(b);
       resolveBlockTank(b);
-      resolveBlockTroop(b);
     }
 
     for (let i = 0; i < blocks.length; i++) {
@@ -914,17 +905,18 @@
         tank.hp = Math.max(0, tank.hp - weapon.damage * falloff);
       }
     }
-    // A blast close enough to breach the wall/roof right next to the
-    // troops can hurt them directly too, on top of anything that
-    // physically falls on them (resolveBlockTroop) -- most direct hits on
-    // an enclosing block destroy it outright rather than sending it
-    // tumbling, so proximity to the blast is the more reliable danger.
-    for (const troop of troops) {
-      if (!troop.alive || troop.rescued) continue;
-      const troopY = terrainAt(troop.x) - 12;
-      const d = Math.hypot(troop.x - x, troopY - y);
-      if (d < weapon.blastRadius + 15) {
-        troop.alive = false;
+    // The room shields the troops from anything exploding outside it --
+    // only a shot that actually gets inside the walls puts them at risk.
+    // A blast landing just outside an intact wall does nothing to them,
+    // no matter how close it is.
+    if (isInsideBunker(x, y)) {
+      for (const troop of troops) {
+        if (!troop.alive || troop.rescued) continue;
+        const troopY = terrainAt(troop.x) - 12;
+        const d = Math.hypot(troop.x - x, troopY - y);
+        if (d < weapon.blastRadius + 15) {
+          troop.alive = false;
+        }
       }
     }
     applyExplosionToBlocks(x, y, weapon);

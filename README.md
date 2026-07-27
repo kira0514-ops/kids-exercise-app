@@ -7,11 +7,14 @@ browser — no build step, no server, no external libraries.
 
 Open `index.html` in any modern browser (or serve the folder with any static
 file server), then pick **2 Player (Hotseat)**, **Vs Computer**, or **Rescue
-Mission (Solo)** — a no-opponent mode where a squad is boxed in by an
-enemy bunker; blast open the sandbag walls and concrete roof surrounding
-them so an evac chopper can fly in and save them. Careless heavy ordinance
-right on top of the squad can hurt them too, so precision matters most on
-the last few blocks directly overhead.
+Mission (Solo)** — a no-opponent mode where a squad shelters inside a
+bunker; blast open the sandbag walls and concrete roof surrounding them
+so an evac chopper can fly in and save them. The room genuinely protects
+them — shots outside it, even right up against a wall, can't reach the
+squad — but a shot that actually lands inside the room (not just the
+last block falling, but the blast itself getting past the walls) can
+hurt them, so don't get sloppy once you're punching through the roof
+right over their heads.
 
 ```
 python3 -m http.server 8000
@@ -62,10 +65,11 @@ sideways every turn. Destroy the other tank before it destroys you.
   in, land, extract the troops, and fly back off before the mission is
   scored on shots fired. The chopper only needs a clear shaft of air
   directly above the squad to land -- leftover wall rubble elsewhere
-  doesn't hold up the rescue. Blasts close enough to the squad (not just
-  a block physically landing on them) can injure or kill a trooper, so a
-  wide-blast weapon used carelessly near the interior costs you the squad
-  even on an otherwise-successful breach.
+  doesn't hold up the rescue. The room is a genuine shield: an explosion
+  outside it does nothing to the squad no matter how close, even after
+  every wall is gone, but a shot that actually detonates inside the
+  room's air pocket can hurt them, so the last hit or two right over
+  their heads is where care matters most.
 
 ## Files
 
