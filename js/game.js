@@ -19,10 +19,13 @@
 
   const BLOCK_W = 26;
   const BLOCK_H = 20;
+  const BLOCK_HP = 28;
   const BLOCK_GRAVITY = GRAVITY * 1.2;
   const BLOCK_RESTITUTION = 0.3;
   const BLOCK_SLEEP_SPEED = 0.4;
   const BLOCK_SLEEP_FRAMES = 18;
+  const BLOCK_BLAST_DAMAGE_MULT = 1.8;
+  const BLOCK_BLAST_REACH_BONUS = 15;
   const TROOPS_X = W - 45;
 
   const hud = document.getElementById("hud");
@@ -305,8 +308,8 @@
       vx: 0,
       vy: 0,
       av: 0,
-      hp: 40,
-      maxHp: 40,
+      hp: BLOCK_HP,
+      maxHp: BLOCK_HP,
       awake: false,
       settleTimer: 0,
     };
@@ -557,10 +560,10 @@
     const survivors = [];
     for (const block of blocks) {
       const d = Math.hypot(block.x - x, block.y - y);
-      const reach = weapon.blastRadius + Math.max(block.w, block.h) / 2;
+      const reach = weapon.blastRadius + Math.max(block.w, block.h) / 2 + BLOCK_BLAST_REACH_BONUS;
       if (d < reach) {
         const falloff = Math.max(0, 1 - d / reach);
-        block.hp -= weapon.damage * falloff * 1.4;
+        block.hp -= weapon.damage * falloff * BLOCK_BLAST_DAMAGE_MULT;
         const ang = Math.atan2(block.y - y, block.x - x);
         const force = falloff * (weapon.damage / 7);
         block.vx += Math.cos(ang) * force;
