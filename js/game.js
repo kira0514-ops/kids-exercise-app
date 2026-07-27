@@ -431,6 +431,36 @@
     }
   }
 
+  // Keeps the troops' room a genuinely clear space: any block drifting
+  // toward the interior air pocket (from an explosion knocking it loose,
+  // or a partial collapse) gets pushed back out along whichever boundary
+  // it's closest to crossing -- the left wall line, the right wall line,
+  // or the roof's underside -- so debris piles up around the room instead
+  // of spilling into it and burying the troops in rubble.
+  function resolveBlockRoom(b) {
+    const groundY = terrainAt(TROOPS_X);
+    const roomLeft = TROOPS_X - BUNKER_HALF_WIDTH;
+    const roomRight = TROOPS_X + BUNKER_HALF_WIDTH;
+    const roomTop = groundY - BUNKER_WALL_HEIGHT * BLOCK_H;
+
+    const bA = blockAABB(b);
+    const overlapsX = bA.maxX > roomLeft && bA.minX < roomRight;
+    const overlapsY = bA.maxY > roomTop && bA.minY < groundY;
+    if (!overlapsX || !overlapsY) return;
+
+    const options = [
+      { amount: bA.maxX - roomLeft, dx: -(bA.maxX - roomLeft), dy: 0 },
+      { amount: roomRight - bA.minX, dx: roomRight - bA.minX, dy: 0 },
+      { amount: bA.maxY - roomTop, dx: 0, dy: -(bA.maxY - roomTop) },
+    ];
+    options.sort((a, c) => a.amount - c.amount);
+    const push = options[0];
+    b.x += push.dx;
+    b.y += push.dy;
+    if (push.dx !== 0) b.vx *= -0.35;
+    else if (b.vy > 0) b.vy = -b.vy * 0.35;
+  }
+
   function resolveBlockTank(b) {
     for (const tank of tanks) {
       if (!tank.alive) continue;
@@ -570,6 +600,7 @@
       b.av = Math.max(-0.85, Math.min(0.85, b.av));
       resolveBlockTerrain(b);
       resolveBlockTank(b);
+      if (mode === "demolition") resolveBlockRoom(b);
     }
 
     for (let i = 0; i < blocks.length; i++) {

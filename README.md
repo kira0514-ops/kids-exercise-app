@@ -69,7 +69,11 @@ sideways every turn. Destroy the other tank before it destroys you.
   outside it does nothing to the squad no matter how close, even after
   every wall is gone, but a shot that actually detonates inside the
   room's air pocket can hurt them, so the last hit or two right over
-  their heads is where care matters most.
+  their heads is where care matters most. The room's interior is also
+  physically kept clear -- any block knocked loose by an explosion gets
+  deflected off the room's boundary (the wall lines, the roof's
+  underside) instead of tumbling in and piling up on the squad, so
+  debris collects around the room, never inside it.
 
 ## Files
 
