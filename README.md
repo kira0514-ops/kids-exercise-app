@@ -25,7 +25,8 @@ sideways every turn. Destroy the other tank before it destroys you.
 - **Shell** — unlimited, balanced damage and blast radius.
 - **Heavy Shell** — slower but hits much harder with a bigger blast (3 per
   battle).
-- **Rocket** — fast and flat-flying, good for direct hits (3 per battle).
+- **Rocket** — fast and flat-flying, hits noticeably harder than the base
+  Shell, good for direct hits (3 per battle).
 - **Cluster Bomb** — splits into 5 bomblets at the top of its arc, showering
   a wide area (2 per battle).
 

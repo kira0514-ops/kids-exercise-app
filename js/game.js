@@ -67,7 +67,7 @@
       infinite: false,
       speedMult: 1.32,
       blastRadius: 30,
-      damage: 40,
+      damage: 46,
       color: "#e63946",
       trailColor: "#f4a261",
     },
