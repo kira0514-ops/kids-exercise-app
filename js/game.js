@@ -26,7 +26,7 @@
   const BLOCK_SLEEP_FRAMES = 18;
   const BLOCK_BLAST_DAMAGE_MULT = 1.8;
   const BLOCK_BLAST_REACH_BONUS = 15;
-  const TROOPS_X = W - 45;
+  const TROOPS_X = W - 130;
 
   const hud = document.getElementById("hud");
   const turnIndicatorEl = document.getElementById("turn-indicator");
@@ -298,7 +298,7 @@
   // physics -- gravity, rotation, collision with terrain/other blocks/tanks,
   // and a sleep/wake cycle so settled stacks stop needing simulation.
   // ---------------------------------------------------------------------
-  function makeBlock(x, y) {
+  function makeBlock(x, y, material = "crate") {
     return {
       x,
       y,
@@ -312,6 +312,7 @@
       maxHp: BLOCK_HP,
       awake: false,
       settleTimer: 0,
+      material,
     };
   }
 
@@ -330,6 +331,43 @@
       rowBottom -= BLOCK_H;
     }
     return stack;
+  }
+
+  // An enclosed bunker for Rescue Mission mode: thick sandbag walls on
+  // either side of the troops and a concrete roof spanning across the top,
+  // so the troops are genuinely boxed in until every wall/roof block is
+  // cleared -- a shot has to breach a wall or punch through the roof, not
+  // just land somewhere nearby.
+  function generateBunker(centerX) {
+    const wallThickness = 2;
+    const wallHeight = 4;
+    const halfWidth = 40;
+    const groundY = terrainAt(centerX);
+    const blocks = [];
+
+    for (let side = -1; side <= 1; side += 2) {
+      for (let col = 0; col < wallThickness; col++) {
+        const bx = centerX + side * (halfWidth + BLOCK_W / 2 + col * BLOCK_W);
+        for (let row = 0; row < wallHeight; row++) {
+          const by = groundY - BLOCK_H / 2 - row * BLOCK_H;
+          blocks.push(makeBlock(bx, by, "sandbag"));
+        }
+      }
+    }
+
+    const roofLeft = centerX - halfWidth - wallThickness * BLOCK_W;
+    const roofRight = centerX + halfWidth + wallThickness * BLOCK_W;
+    const roofBlockCount = Math.round((roofRight - roofLeft) / BLOCK_W);
+    const roofStartX = roofLeft + BLOCK_W / 2;
+    const roofRows = 2;
+    for (let row = 0; row < roofRows; row++) {
+      const by = groundY - BLOCK_H / 2 - wallHeight * BLOCK_H - row * BLOCK_H;
+      for (let i = 0; i < roofBlockCount; i++) {
+        blocks.push(makeBlock(roofStartX + i * BLOCK_W, by, "concrete"));
+      }
+    }
+
+    return blocks;
   }
 
   function blockCorners(b) {
@@ -479,15 +517,28 @@
     }
   }
 
+  // A block counts as supported if it (or the connected cluster of blocks
+  // it's touching on any side) traces back to the ground -- so a roof
+  // block bridging the gap between two walls stays up as long as the
+  // walls under its neighbors are still standing, the way a real beam
+  // spans an opening instead of needing something directly beneath it.
   function isBlockSupported(b) {
-    const bA = blockAABB(b);
-    if (bA.maxY >= terrainAt(b.x) - 1.5) return true;
-    for (const other of blocks) {
-      if (other === b) continue;
-      const oA = blockAABB(other);
-      const overlapsX = bA.minX < oA.maxX && bA.maxX > oA.minX;
-      const touching = Math.abs(bA.maxY - oA.minY) < 3;
-      if (overlapsX && touching) return true;
+    const visited = new Set([b]);
+    const stack = [b];
+    while (stack.length) {
+      const cur = stack.pop();
+      const cA = blockAABB(cur);
+      if (cA.maxY >= terrainAt(cur.x) - 1.5) return true;
+      for (const other of blocks) {
+        if (visited.has(other)) continue;
+        const oA = blockAABB(other);
+        const touchingX = cA.minX - 2 < oA.maxX && cA.maxX + 2 > oA.minX;
+        const touchingY = cA.minY - 2 < oA.maxY && cA.maxY + 2 > oA.minY;
+        if (touchingX && touchingY) {
+          visited.add(other);
+          stack.push(other);
+        }
+      }
     }
     return false;
   }
@@ -593,14 +644,11 @@
     const p1 = makeTank("left", "Player 1", "#e63946", false);
     if (mode === "demolition") {
       tanks = [p1];
-      blocks = [
-        ...makeBlockStack(W * 0.58, [6, 5, 4, 3, 2, 1]),
-        ...makeBlockStack(W * 0.85, [5, 4, 3, 2, 1]),
-      ];
+      blocks = generateBunker(TROOPS_X);
       shotsFired = 0;
       troops = generateTroops();
       heli = null;
-      statusIndicatorEl.textContent = "Clear the LZ";
+      statusIndicatorEl.textContent = "Clear the bunker";
       restartBtn.textContent = "New Mission";
     } else {
       const p2 =
@@ -1145,7 +1193,7 @@
         statusIndicatorEl.textContent = "Mission Complete!";
         showOverlay(
           "Troops Rescued!",
-          `Cleared the LZ and evac'd the squad in ${shotsFired} shot${shotsFired === 1 ? "" : "s"}.`,
+          `Blew open the bunker and evac'd the squad in ${shotsFired} shot${shotsFired === 1 ? "" : "s"}.`,
           "New Mission"
         );
       }
@@ -1728,6 +1776,104 @@
     ctx.fill();
   }
 
+  function drawCrateBlock(b, dmgRatio) {
+    const base = [150, 102, 58];
+    const shade = base.map((c) => Math.round(c * (0.55 + 0.45 * dmgRatio)));
+    ctx.fillStyle = `rgb(${shade[0]},${shade[1]},${shade[2]})`;
+    ctx.fillRect(-b.w / 2, -b.h / 2, b.w, b.h);
+
+    ctx.strokeStyle = "rgba(0,0,0,0.4)";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(-b.w / 2, -b.h / 2, b.w, b.h);
+
+    // Plank cross-bracing for a crate look, plus corner nail dots.
+    ctx.strokeStyle = "rgba(0,0,0,0.22)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-b.w / 2, -b.h / 2);
+    ctx.lineTo(b.w / 2, b.h / 2);
+    ctx.moveTo(b.w / 2, -b.h / 2);
+    ctx.lineTo(-b.w / 2, b.h / 2);
+    ctx.stroke();
+    ctx.fillStyle = "rgba(0,0,0,0.3)";
+    for (const [cx, cy] of [
+      [-b.w / 2 + 3, -b.h / 2 + 3],
+      [b.w / 2 - 3, -b.h / 2 + 3],
+      [-b.w / 2 + 3, b.h / 2 - 3],
+      [b.w / 2 - 3, b.h / 2 - 3],
+    ]) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, 1.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function drawSandbagBlock(b, dmgRatio) {
+    const base = [148, 133, 84];
+    const shade = base.map((c) => Math.round(c * (0.6 + 0.4 * dmgRatio)));
+    const w = b.w;
+    const h = b.h;
+    ctx.beginPath();
+    ctx.moveTo(-w / 2, -h / 2 + 3);
+    ctx.quadraticCurveTo(-w / 4, -h / 2 - 2, 0, -h / 2 + 1);
+    ctx.quadraticCurveTo(w / 4, -h / 2 - 2, w / 2, -h / 2 + 3);
+    ctx.quadraticCurveTo(w / 2 + 2, 0, w / 2, h / 2 - 3);
+    ctx.quadraticCurveTo(w / 4, h / 2 + 2, 0, h / 2 - 1);
+    ctx.quadraticCurveTo(-w / 4, h / 2 + 2, -w / 2, h / 2 - 3);
+    ctx.quadraticCurveTo(-w / 2 - 2, 0, -w / 2, -h / 2 + 3);
+    ctx.closePath();
+    ctx.fillStyle = `rgb(${shade[0]},${shade[1]},${shade[2]})`;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(0,0,0,0.35)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Cinched center seam and end ties, like a tied-off sandbag.
+    ctx.strokeStyle = "rgba(0,0,0,0.28)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-w / 2 + 3, 0);
+    ctx.lineTo(w / 2 - 3, 0);
+    ctx.stroke();
+    ctx.strokeStyle = "rgba(255,255,255,0.15)";
+    ctx.beginPath();
+    ctx.moveTo(-w / 3, -h / 2 + 4);
+    ctx.lineTo(-w / 3, h / 2 - 4);
+    ctx.moveTo(w / 3, -h / 2 + 4);
+    ctx.lineTo(w / 3, h / 2 - 4);
+    ctx.stroke();
+  }
+
+  function drawConcreteBlock(b, dmgRatio) {
+    const base = [132, 132, 128];
+    const shade = base.map((c) => Math.round(c * (0.6 + 0.4 * dmgRatio)));
+    ctx.fillStyle = `rgb(${shade[0]},${shade[1]},${shade[2]})`;
+    ctx.fillRect(-b.w / 2, -b.h / 2, b.w, b.h);
+    ctx.strokeStyle = "rgba(0,0,0,0.4)";
+    ctx.lineWidth = 1.3;
+    ctx.strokeRect(-b.w / 2, -b.h / 2, b.w, b.h);
+
+    // Speckled aggregate texture and a rebar hint along one edge.
+    ctx.fillStyle = "rgba(0,0,0,0.18)";
+    for (const [dx, dy] of [
+      [-6, -4],
+      [5, 2],
+      [-2, 6],
+      [7, -6],
+      [-8, 2],
+    ]) {
+      ctx.beginPath();
+      ctx.arc(dx, dy, 1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.strokeStyle = "rgba(90,90,85,0.6)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-b.w / 2 + 2, b.h / 2 - 2);
+    ctx.lineTo(b.w / 2 - 2, b.h / 2 - 2);
+    ctx.stroke();
+  }
+
   function drawBlocks() {
     for (const b of blocks) {
       ctx.save();
@@ -1735,37 +1881,11 @@
       ctx.rotate(b.angle);
 
       const dmgRatio = Math.max(0, b.hp / b.maxHp);
-      const base = [150, 102, 58];
-      const shade = base.map((c) => Math.round(c * (0.55 + 0.45 * dmgRatio)));
-      ctx.fillStyle = `rgb(${shade[0]},${shade[1]},${shade[2]})`;
-      ctx.fillRect(-b.w / 2, -b.h / 2, b.w, b.h);
+      if (b.material === "sandbag") drawSandbagBlock(b, dmgRatio);
+      else if (b.material === "concrete") drawConcreteBlock(b, dmgRatio);
+      else drawCrateBlock(b, dmgRatio);
 
-      ctx.strokeStyle = "rgba(0,0,0,0.4)";
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(-b.w / 2, -b.h / 2, b.w, b.h);
-
-      // Plank cross-bracing for a crate look, plus corner nail dots.
-      ctx.strokeStyle = "rgba(0,0,0,0.22)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.moveTo(-b.w / 2, -b.h / 2);
-      ctx.lineTo(b.w / 2, b.h / 2);
-      ctx.moveTo(b.w / 2, -b.h / 2);
-      ctx.lineTo(-b.w / 2, b.h / 2);
-      ctx.stroke();
-      ctx.fillStyle = "rgba(0,0,0,0.3)";
-      for (const [cx, cy] of [
-        [-b.w / 2 + 3, -b.h / 2 + 3],
-        [b.w / 2 - 3, -b.h / 2 + 3],
-        [-b.w / 2 + 3, b.h / 2 - 3],
-        [b.w / 2 - 3, b.h / 2 - 3],
-      ]) {
-        ctx.beginPath();
-        ctx.arc(cx, cy, 1.2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      // Crack overlay once it's taken real damage.
+      // Crack overlay once it's taken real damage, shared across materials.
       if (dmgRatio < 0.6) {
         ctx.strokeStyle = `rgba(20,10,5,${(0.6 - dmgRatio) * 1.2})`;
         ctx.lineWidth = 1.2;
