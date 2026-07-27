@@ -39,6 +39,18 @@ body {
   color: #ffd166;
 }
 
+.demo-only {
+  display: none;
+}
+
+#hud.demolition .demo-only {
+  display: block;
+}
+
+#hud.demolition .vs-only {
+  display: none;
+}
+
 #restart-btn {
   margin-left: auto;
   padding: 8px 14px;
@@ -144,10 +156,12 @@ canvas#game {
   display: flex;
   gap: 12px;
   justify-content: center;
+  flex-wrap: wrap;
 }
 
 #mode-2p,
 #mode-ai,
+#mode-demo,
 #overlay-btn {
   padding: 10px 22px;
   border: none;
@@ -161,6 +175,7 @@ canvas#game {
 
 #mode-2p:hover,
 #mode-ai:hover,
+#mode-demo:hover,
 #overlay-btn:hover {
   background: #05b989;
 }

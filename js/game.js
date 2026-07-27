@@ -23,9 +23,12 @@
   const BLOCK_SLEEP_SPEED = 0.4;
   const BLOCK_SLEEP_FRAMES = 18;
 
+  const hud = document.getElementById("hud");
   const turnIndicatorEl = document.getElementById("turn-indicator");
   const windIndicatorEl = document.getElementById("wind-indicator");
   const winsIndicatorEl = document.getElementById("wins-indicator");
+  const blocksIndicatorEl = document.getElementById("blocks-indicator");
+  const shotsIndicatorEl = document.getElementById("shots-indicator");
   const restartBtn = document.getElementById("restart-btn");
   const modeSelect = document.getElementById("mode-select");
   const overlay = document.getElementById("overlay");
@@ -104,6 +107,7 @@
   let wins = [0, 0];
   let aiTimer = 0;
   let roundOver = false;
+  let shotsFired = 0;
   let shakeTime = 0;
   let shakeMag = 0;
 
@@ -294,9 +298,9 @@
     };
   }
 
-  // A small pyramid of crates (3-2-1) resting on the terrain at centerX.
-  function makeBlockStack(centerX) {
-    const rows = [3, 2, 1];
+  // A pyramid of crates resting on the terrain at centerX, row sizes from
+  // bottom to top given by `rows` (defaults to a small 3-2-1 stack).
+  function makeBlockStack(centerX, rows = [3, 2, 1]) {
     const stack = [];
     let rowBottom = terrainAt(centerX);
     for (const count of rows) {
@@ -538,13 +542,24 @@
     birds = generateBirds();
     strata = generateStrata();
     grassTufts = generateGrassTufts();
+    hud.classList.toggle("demolition", mode === "demolition");
+
     const p1 = makeTank("left", "Player 1", "#e63946", false);
-    const p2 =
-      mode === "ai"
-        ? makeTank("right", "CPU", "#457b9d", true)
-        : makeTank("right", "Player 2", "#457b9d", false);
-    tanks = [p1, p2];
-    blocks = [...makeBlockStack(p1.x + 100), ...makeBlockStack(p2.x - 100)];
+    if (mode === "demolition") {
+      tanks = [p1];
+      blocks = [...makeBlockStack(W * 0.58, [4, 3, 2, 1]), ...makeBlockStack(W * 0.83, [3, 2, 1])];
+      shotsFired = 0;
+      restartBtn.textContent = "New Structure";
+    } else {
+      const p2 =
+        mode === "ai"
+          ? makeTank("right", "CPU", "#457b9d", true)
+          : makeTank("right", "Player 2", "#457b9d", false);
+      tanks = [p1, p2];
+      blocks = [...makeBlockStack(p1.x + 100, [3, 2, 1]), ...makeBlockStack(p2.x - 100, [3, 2, 1])];
+      restartBtn.textContent = "New Battle";
+    }
+
     currentTurn = 0;
     wind = Math.round(rand(-25, 25));
     selectedWeapon = "standard";
@@ -587,10 +602,15 @@
   // HUD
   // ---------------------------------------------------------------------
   function updateHud() {
-    const t = tanks[currentTurn];
-    turnIndicatorEl.textContent = t.label;
     windIndicatorEl.textContent = (wind >= 0 ? "-> " : "<- ") + Math.abs(wind);
-    winsIndicatorEl.textContent = `${wins[0]} - ${wins[1]}`;
+    if (mode === "demolition") {
+      blocksIndicatorEl.textContent = String(blocks.length);
+      shotsIndicatorEl.textContent = String(shotsFired);
+    } else {
+      const t = tanks[currentTurn];
+      turnIndicatorEl.textContent = t.label;
+      winsIndicatorEl.textContent = `${wins[0]} - ${wins[1]}`;
+    }
   }
 
   function updateWeaponUI() {
@@ -639,6 +659,11 @@
   });
   document.getElementById("mode-ai").addEventListener("click", () => {
     mode = "ai";
+    modeSelect.classList.add("hidden");
+    newBattle();
+  });
+  document.getElementById("mode-demo").addEventListener("click", () => {
+    mode = "demolition";
     modeSelect.classList.add("hidden");
     newBattle();
   });
@@ -727,6 +752,7 @@
       trail: [],
     });
     turnState = "resolving";
+    shotsFired++;
     updateWeaponUI();
   }
 
@@ -983,20 +1009,39 @@
     if (turnState === "resolving") {
       stepProjectiles(dt);
       if (projectiles.length === 0) {
-        const dead = tanks.filter((t) => t.hp <= 0);
-        if (dead.length > 0) {
-          for (const t of dead) t.alive = false;
-          roundOver = true;
-          const winnerIdx = tanks[0].hp <= 0 ? 1 : 0;
-          wins[winnerIdx]++;
-          winsIndicatorEl.textContent = `${wins[0]} - ${wins[1]}`;
-          showOverlay(
-            `${tanks[winnerIdx].label} Wins!`,
-            `${tanks[1 - winnerIdx].label}'s tank was destroyed.`,
-            "Rematch"
-          );
+        if (mode === "demolition") {
+          if (blocks.length === 0) {
+            roundOver = true;
+            showOverlay(
+              "Structure Demolished!",
+              `Cleared it in ${shotsFired} shot${shotsFired === 1 ? "" : "s"}.`,
+              "New Structure"
+            );
+          } else {
+            turnState = "aiming";
+            wind = Math.round(rand(-25, 25));
+            if (selectedWeapon !== "standard" && tanks[0].ammo[selectedWeapon] <= 0) {
+              selectedWeapon = "standard";
+            }
+            updateWeaponUI();
+            updateHud();
+          }
         } else {
-          nextTurn();
+          const dead = tanks.filter((t) => t.hp <= 0);
+          if (dead.length > 0) {
+            for (const t of dead) t.alive = false;
+            roundOver = true;
+            const winnerIdx = tanks[0].hp <= 0 ? 1 : 0;
+            wins[winnerIdx]++;
+            winsIndicatorEl.textContent = `${wins[0]} - ${wins[1]}`;
+            showOverlay(
+              `${tanks[winnerIdx].label} Wins!`,
+              `${tanks[1 - winnerIdx].label}'s tank was destroyed.`,
+              "Rematch"
+            );
+          } else {
+            nextTurn();
+          }
         }
       }
     }

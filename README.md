@@ -6,7 +6,9 @@ browser — no build step, no server, no external libraries.
 ## How to play
 
 Open `index.html` in any modern browser (or serve the folder with any static
-file server), then pick **2 Player (Hotseat)** or **Vs Computer**.
+file server), then pick **2 Player (Hotseat)**, **Vs Computer**, or
+**Demolition (Solo)** — a no-opponent mode where you just blast apart block
+towers for score (fewest shots wins).
 
 ```
 python3 -m http.server 8000
@@ -47,6 +49,9 @@ sideways every turn. Destroy the other tank before it destroys you.
 - Hotseat 2-player mode and a single-player mode with a simple AI opponent
   that searches candidate angles/power to aim at the player, then fires with
   some human-like inaccuracy.
+- A third, opponent-free Demolition mode: a single tank faces two bigger
+  crate structures with nothing shooting back, tracking shots fired and
+  blocks remaining until the course is cleared.
 
 ## Files
 
