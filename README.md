@@ -1,82 +1,101 @@
-# StockScope
+# Tank Duel
 
-A native Android app (Kotlin + Jetpack Compose) that turns a ticker into the same
-kind of report the `stock-analyzer` skill produces: fundamentals, technical
-readings, a sector peer comparison, bear/base/bull/stretched-bull price targets,
-and a 100-point conviction score.
+A lightweight, dependency-free artillery duel game that runs entirely in the
+browser — no build step, no server, no external libraries.
 
-## What it does
+## How to play
 
-1. **Add a ticker** to your watchlist. Each row shows live price, day change,
-   and conviction score.
-2. **Tap a ticker** to open the full report:
-   - **Chart** — TradingView's free embedded Advanced Chart widget.
-   - **Technicals** — RSI(14), MACD(12,26,9), ADX(14) with +DI/-DI, a slow
-     Stochastic(14,3,3), the SMA20/50/200 stack against the current price, and
-     swing structure across three timeframes: daily minor (3-bar fractal),
-     daily major (8-bar), and weekly (3-bar on weekly-resampled bars). A
-     **trend confirmation** banner combines all of it — swing structure across
-     timeframes (higher-highs/higher-lows or the reverse) plus a majority vote
-     across the momentum indicators — into one verdict: confirmed up, confirmed
-     down, mixed, or not enough data. Everything is computed on-device from a
-     year of daily OHLC bars pulled from Yahoo's chart endpoint — nothing
-     scraped from the chart widget itself.
-   - **Fundamentals** — price, market cap, trailing/forward P/E, EPS, revenue
-     growth, margins, cash vs. debt, free cash flow, dividend yield, beta,
-     52-week range, 50D/200D moving averages.
-   - **Sector comparison** — the ticker ranked against 5 peers (from Yahoo's
-     recommendation engine, falling back to a curated per-sector list) on
-     forward P/E, margin, and growth.
-   - **Asymmetry** — bear/base/bull/stretched-bull price targets computed as
-     `anchor EPS × peer P/E multiple`, plus an entry zone, a trim zone, and a
-     thesis-break level. All heuristic and clearly labeled as such — not a
-     forecast.
-   - **Conviction score** — 100 points split across valuation, growth,
-     quality/margins, and balance-sheet strength, mapped to a tier (Strong
-     Conviction / Buy / Hold-Watch / Avoid).
-   - **Narrative** — the company's business summary plus recent headlines.
-
-Data comes from Yahoo Finance's public, unauthenticated endpoints — no API key
-required. These endpoints are undocumented and can change or rate-limit
-without notice; every network response is optional/nullable in the app so a
-missing field degrades gracefully instead of crashing.
-
-## Architecture
-
-- **UI**: Jetpack Compose + Material3, single-activity, Navigation-Compose
-  between a watchlist screen and a detail screen.
-- **State**: MVVM with `ViewModel` + `StateFlow`; a small hand-rolled
-  `AppContainer` service locator instead of a DI framework (the app is small
-  enough that Hilt would be pure overhead).
-- **Networking**: Retrofit + OkHttp + kotlinx.serialization, hitting Yahoo
-  Finance's `v8/finance/chart`, `v10/finance/quoteSummary`,
-  `v1/finance/search`, and `v6/finance/recommendationsbysymbol` endpoints. A
-  `CrumbManager` primes a session cookie and crumb token (the mechanism Yahoo
-  has required since 2024) and an OkHttp `CookieJar` implementation uses
-  `Cookie.matches()` for proper RFC 6265 domain matching across Yahoo's
-  subdomains.
-- **Persistence**: watchlist tickers are stored locally with Jetpack
-  DataStore (Preferences) — no backend, no account.
-- **Scoring**: `ScoringEngine` (in `domain/`) is pure and unit-testable —
-  it turns fundamentals into the conviction score and asymmetry targets with
-  no I/O. `TechnicalAnalysisEngine` is the same kind of pure, tested function:
-  daily candles in, RSI/MACD/ADX/Stochastic/moving averages/swing points out.
-
-## Building
-
-Requires Android Studio (or the Android SDK + JDK 17) with `compileSdk 35`.
+Open `index.html` in any modern browser (or serve the folder with any static
+file server), then pick **2 Player (Hotseat)**, **Vs Computer**, or **Rescue
+Mission (Solo)** — a no-opponent mode where a squad shelters inside a
+bunker; blast open the sandbag walls and concrete roof surrounding them
+so an evac chopper can fly in and save them. The room genuinely protects
+them — shots outside it, even right up against a wall, can't reach the
+squad — but a shot that actually lands inside the room (not just the
+last block falling, but the blast itself getting past the walls) can
+hurt them, so don't get sloppy once you're punching through the roof
+right over their heads.
 
 ```
-./gradlew assembleDebug
+python3 -m http.server 8000
+# then visit http://localhost:8000
 ```
 
-> This project was scaffolded and reviewed in an environment without network
-> access to Google's Maven repository or an installed Android SDK, so the
-> Gradle wrapper was generated and the code was carefully hand-reviewed for
-> compile correctness, but `assembleDebug` itself has not been run. Build it
-> once in Android Studio and fix anything that surfaces before shipping.
+Pick a weapon from the bar above the battlefield, then drag from your tank's
+turret in the direction (and distance) you want to fire — farther drags mean
+more power — and release to launch. Watch the wind arrow: it pushes shells
+sideways every turn. Destroy the other tank before it destroys you.
 
-## Disclaimer
+## Weapons
 
-StockScope is an informational research tool, not financial advice. Data may
-be delayed or incomplete — verify independently before trading.
+- **Shell** — unlimited, balanced damage and blast radius.
+- **Heavy Shell** — slower but hits much harder with a bigger blast (3 per
+  battle).
+- **Rocket** — fast and flat-flying, hits noticeably harder than the base
+  Shell, good for direct hits (3 per battle).
+- **Cluster Bomb** — splits into 5 bomblets at the top of its arc, showering
+  a wide area (2 per battle).
+
+## What's implemented
+
+- Custom 2D physics (gravity, wind drift, projectile motion) written from
+  scratch — no game engine dependency.
+- Procedurally generated, fully destructible terrain: explosions carve
+  permanent craters, and tanks settle onto the new surface.
+- A crate pyramid guarding each tank in PvP, and a fully enclosed sandbag
+  bunker (thick walls + a spanning concrete roof) around the trapped squad
+  in Rescue Mission mode, all built on the same lightweight rigid-body-ish
+  block physics: gravity, rotation, impact-driven toppling torque, and a
+  connected-component sleep/wake check -- a roof block with nothing directly
+  under it stays put as long as it's still structurally connected to the
+  ground through the walls, so breaching one wall brings down a real
+  domino-style collapse instead of the whole structure floating in place
+  (a falling block can even crush a tank beneath it).
+- Drag-to-aim controls (mouse or touch via Pointer Events) with a live
+  trajectory preview and power meter.
+- Four weapons with distinct speed, blast radius, and damage, including a
+  cluster bomb that splits mid-flight into independent bomblets.
+- Blast damage with distance falloff, per-tank ammo tracking, and a wins
+  tally across rematches.
+- Hotseat 2-player mode and a single-player mode with a simple AI opponent
+  that searches candidate angles/power to aim at the player, then fires with
+  some human-like inaccuracy.
+- A third, opponent-free Rescue Mission mode: blow open the bunker
+  enclosing a pinned-down squad, then watch a scripted evac chopper fly
+  in, land, extract the troops, and fly back off before the mission is
+  scored on shots fired. The chopper only needs a clear shaft of air
+  directly above the squad to land -- leftover wall rubble elsewhere
+  doesn't hold up the rescue. The room is a genuine shield: an explosion
+  outside it does nothing to the squad no matter how close, even after
+  every wall is gone, but a shot that actually detonates inside the
+  room's air pocket can hurt them, so the last hit or two right over
+  their heads is where care matters most. The room's interior is also
+  physically kept clear -- any block knocked loose by an explosion gets
+  deflected off the room's boundary (the wall lines, the roof's
+  underside) instead of tumbling in and piling up on the squad, so
+  debris collects around the room, never inside it. A permanent steel
+  frame (side bars plus a ceiling lintel) marks the room's true
+  boundary regardless of how much rubble is still standing. The bunker
+  itself is picked at random from six distinct blueprints each mission --
+  a thick twin sandbag fortress, a wide wooden crate barricade, tall
+  single-file pillars under a heavy concrete slab, a stepped ziggurat
+  wall that rises in tiers toward the room, a mixed sandbag/crate
+  defense, and a castle-tower frame (slim wood posts, a glass/ice
+  crossbeam, a stone cube pile capping it off) -- so the structure you
+  have to fight through changes every time. The mission has real teeth:
+  the base Shell is rationed to 14 rounds instead of unlimited, the
+  hardened concrete/ice/stone blocks take more punishment than plain
+  sandbag/crate/wood, and the chopper needs a wider gap cleared overhead
+  before it'll come in -- run the whole magazine dry before the LZ opens
+  up and the mission ends in failure.
+- A couple of small planes and flying saucers drift across the sky in
+  every mode, purely for atmosphere -- their position is driven by the
+  clock rather than per-frame physics, so they glide by steadily even
+  while the game is paused on a win/lose screen.
+
+## Files
+
+- `index.html` — page shell, HUD, weapon bar, and mode-select/win overlays.
+- `css/style.css` — layout and styling.
+- `js/game.js` — the entire game: terrain, physics, weapons, AI, input, and
+  rendering on an HTML5 canvas.
