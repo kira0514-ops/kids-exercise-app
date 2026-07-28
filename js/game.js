@@ -323,17 +323,19 @@
     };
   }
 
-  // A pyramid of crates resting on the terrain at centerX, row sizes from
-  // bottom to top given by `rows` (defaults to a small 3-2-1 stack).
-  function makeBlockStack(centerX, rows = [3, 2, 1]) {
+  // A pyramid of blocks, row sizes from bottom to top given by `rows`
+  // (defaults to a small 3-2-1 stack). Rests on the terrain at centerX
+  // unless `startY` gives an explicit bottom edge (e.g. stacking a cap
+  // on top of some other structure instead of the ground).
+  function makeBlockStack(centerX, rows = [3, 2, 1], startY = null, material = "crate") {
     const stack = [];
-    let rowBottom = terrainAt(centerX);
+    let rowBottom = startY != null ? startY : terrainAt(centerX);
     for (const count of rows) {
       const rowCenterY = rowBottom - BLOCK_H / 2;
       const totalW = count * BLOCK_W;
       const startX = centerX - totalW / 2 + BLOCK_W / 2;
       for (let i = 0; i < count; i++) {
-        stack.push(makeBlock(startX + i * BLOCK_W, rowCenterY));
+        stack.push(makeBlock(startX + i * BLOCK_W, rowCenterY, material));
       }
       rowBottom -= BLOCK_H;
     }
@@ -346,19 +348,22 @@
   // pattern, picked at random each time generateBunker() runs.
   const BUNKER_LAYOUTS = [
     // The original: thick twin sandbag walls, flat 2-row concrete roof.
-    { name: "sandbag-fortress", thickness: 2, height: 4, wallMaterial: "sandbag", roofRows: 2, taper: false },
+    { name: "sandbag-fortress", thickness: 2, height: 4, wallMaterial: "sandbag", roofRows: 2, roofMaterial: "concrete", taper: false },
     // Thicker but shorter wooden crate barricades -- faster to punch
     // through wall-to-wall, but there's more of it to clear sideways.
-    { name: "crate-barricade", thickness: 3, height: 3, wallMaterial: "crate", roofRows: 2, taper: false },
+    { name: "crate-barricade", thickness: 3, height: 3, wallMaterial: "crate", roofRows: 2, roofMaterial: "concrete", taper: false },
     // Thin single-file pillars holding up a heavy 3-row concrete slab --
     // easy to breach the walls, but the roof itself is the real obstacle.
-    { name: "pillar-slab", thickness: 1, height: 6, wallMaterial: "sandbag", roofRows: 3, taper: false },
+    { name: "pillar-slab", thickness: 1, height: 6, wallMaterial: "sandbag", roofRows: 3, roofMaterial: "concrete", taper: false },
     // A stepped, ziggurat-style profile: the outer columns are shorter
     // than the inner one, so the wall rises in tiers toward the room
     // instead of presenting one flat face.
-    { name: "stepped-ziggurat", thickness: 3, height: 5, wallMaterial: "sandbag", roofRows: 2, taper: true },
+    { name: "stepped-ziggurat", thickness: 3, height: 5, wallMaterial: "sandbag", roofRows: 2, roofMaterial: "concrete", taper: true },
     // Alternating sandbag/crate rows for a mixed-material defense.
-    { name: "mixed-defense", thickness: 2, height: 4, wallMaterial: "row", roofRows: 2, taper: false },
+    { name: "mixed-defense", thickness: 2, height: 4, wallMaterial: "row", roofRows: 2, roofMaterial: "concrete", taper: false },
+    // A castle-tower look: slim wood posts holding up a glass/ice
+    // crossbeam, capped with a small stone cube pile on top.
+    { name: "ice-tower-frame", thickness: 1, height: 5, wallMaterial: "wood", roofRows: 1, roofMaterial: "ice", capPyramid: [2, 1] },
   ];
 
   function generateBunker(centerX) {
@@ -392,8 +397,16 @@
     for (let row = 0; row < layout.roofRows; row++) {
       const by = groundY - BLOCK_H / 2 - layout.height * BLOCK_H - row * BLOCK_H;
       for (let i = 0; i < roofBlockCount; i++) {
-        blocks.push(makeBlock(roofStartX + i * BLOCK_W, by, "concrete"));
+        blocks.push(makeBlock(roofStartX + i * BLOCK_W, by, layout.roofMaterial));
       }
+    }
+
+    // A decorative-but-real cube stack capping some blueprints -- extra
+    // structure sitting right over the room that still has to come down
+    // before the LZ overhead is actually clear.
+    if (layout.capPyramid) {
+      const roofTopY = groundY - layout.height * BLOCK_H - layout.roofRows * BLOCK_H;
+      blocks.push(...makeBlockStack(centerX, layout.capPyramid, roofTopY, "stone"));
     }
 
     return blocks;
@@ -1994,6 +2007,114 @@
     ctx.stroke();
   }
 
+  // A rounded wood-log pillar segment -- horizontal growth-ring bands and
+  // a lengthwise highlight give it a stacked-timber look distinct from
+  // the flat-plank crate.
+  function drawWoodPillarBlock(b, dmgRatio) {
+    const base = [168, 108, 58];
+    const shade = base.map((c) => Math.round(c * (0.6 + 0.4 * dmgRatio)));
+    const w = b.w;
+    const h = b.h;
+    const r = 3;
+    ctx.beginPath();
+    ctx.moveTo(-w / 2 + r, -h / 2);
+    ctx.lineTo(w / 2 - r, -h / 2);
+    ctx.quadraticCurveTo(w / 2, -h / 2, w / 2, -h / 2 + r);
+    ctx.lineTo(w / 2, h / 2 - r);
+    ctx.quadraticCurveTo(w / 2, h / 2, w / 2 - r, h / 2);
+    ctx.lineTo(-w / 2 + r, h / 2);
+    ctx.quadraticCurveTo(-w / 2, h / 2, -w / 2, h / 2 - r);
+    ctx.lineTo(-w / 2, -h / 2 + r);
+    ctx.quadraticCurveTo(-w / 2, -h / 2, -w / 2 + r, -h / 2);
+    ctx.closePath();
+    ctx.fillStyle = `rgb(${shade[0]},${shade[1]},${shade[2]})`;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(60,32,12,0.55)";
+    ctx.lineWidth = 1.3;
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(255,220,180,0.22)";
+    ctx.fillRect(-w / 2 + 3, -h / 2 + 2, 2.5, h - 4);
+
+    ctx.strokeStyle = "rgba(70,38,14,0.4)";
+    ctx.lineWidth = 1;
+    for (let gy = -h / 2 + 4; gy < h / 2 - 2; gy += 5) {
+      ctx.beginPath();
+      ctx.moveTo(-w / 2 + 2, gy);
+      ctx.lineTo(w / 2 - 2, gy);
+      ctx.stroke();
+    }
+  }
+
+  // Pale, semi-transparent glass/ice block: soft blue fill, a diagonal
+  // highlight streak, and thin internal facet lines instead of a solid
+  // material texture.
+  function drawIceBlock(b, dmgRatio) {
+    const alpha = 0.5 + 0.35 * dmgRatio;
+    ctx.fillStyle = `rgba(191,228,245,${alpha})`;
+    ctx.fillRect(-b.w / 2, -b.h / 2, b.w, b.h);
+    ctx.strokeStyle = "rgba(120,175,205,0.75)";
+    ctx.lineWidth = 1.3;
+    ctx.strokeRect(-b.w / 2, -b.h / 2, b.w, b.h);
+
+    ctx.strokeStyle = "rgba(255,255,255,0.55)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-b.w / 2 + 2, b.h / 2 - 2);
+    ctx.lineTo(b.w / 4, -b.h / 2 + 2);
+    ctx.stroke();
+
+    ctx.strokeStyle = "rgba(150,200,220,0.4)";
+    ctx.beginPath();
+    ctx.moveTo(-b.w / 4, -b.h / 2 + 2);
+    ctx.lineTo(0, b.h / 2 - 2);
+    ctx.moveTo(b.w / 2 - 3, -b.h / 2 + 3);
+    ctx.lineTo(b.w / 2 - 3, b.h / 2 - 3);
+    ctx.stroke();
+  }
+
+  // A rounded grey toy-block cube -- lighter top-left facet, darker
+  // bottom-right, for a chunky 3D look distinct from the speckled,
+  // rebar-hinting concrete slab.
+  function drawStoneBlock(b, dmgRatio) {
+    const base = [150, 152, 156];
+    const shade = base.map((c) => Math.round(c * (0.6 + 0.4 * dmgRatio)));
+    const w = b.w;
+    const h = b.h;
+    const r = 3;
+    ctx.beginPath();
+    ctx.moveTo(-w / 2 + r, -h / 2);
+    ctx.lineTo(w / 2 - r, -h / 2);
+    ctx.quadraticCurveTo(w / 2, -h / 2, w / 2, -h / 2 + r);
+    ctx.lineTo(w / 2, h / 2 - r);
+    ctx.quadraticCurveTo(w / 2, h / 2, w / 2 - r, h / 2);
+    ctx.lineTo(-w / 2 + r, h / 2);
+    ctx.quadraticCurveTo(-w / 2, h / 2, -w / 2, h / 2 - r);
+    ctx.lineTo(-w / 2, -h / 2 + r);
+    ctx.quadraticCurveTo(-w / 2, -h / 2, -w / 2 + r, -h / 2);
+    ctx.closePath();
+    ctx.fillStyle = `rgb(${shade[0]},${shade[1]},${shade[2]})`;
+    ctx.fill();
+    ctx.strokeStyle = "rgba(50,52,55,0.5)";
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(255,255,255,0.2)";
+    ctx.beginPath();
+    ctx.moveTo(-w / 2 + 2, -h / 2 + 2);
+    ctx.lineTo(w / 2 - 4, -h / 2 + 2);
+    ctx.lineTo(-w / 2 + 2, h / 2 - 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = "rgba(0,0,0,0.15)";
+    ctx.beginPath();
+    ctx.moveTo(w / 2 - 2, h / 2 - 2);
+    ctx.lineTo(-w / 2 + 4, h / 2 - 2);
+    ctx.lineTo(w / 2 - 2, -h / 2 + 4);
+    ctx.closePath();
+    ctx.fill();
+  }
+
   function drawBlocks() {
     for (const b of blocks) {
       ctx.save();
@@ -2003,6 +2124,9 @@
       const dmgRatio = Math.max(0, b.hp / b.maxHp);
       if (b.material === "sandbag") drawSandbagBlock(b, dmgRatio);
       else if (b.material === "concrete") drawConcreteBlock(b, dmgRatio);
+      else if (b.material === "wood") drawWoodPillarBlock(b, dmgRatio);
+      else if (b.material === "ice") drawIceBlock(b, dmgRatio);
+      else if (b.material === "stone") drawStoneBlock(b, dmgRatio);
       else drawCrateBlock(b, dmgRatio);
 
       // Crack overlay once it's taken real damage, shared across materials.
