@@ -76,8 +76,12 @@ sideways every turn. Destroy the other tank before it destroys you.
   debris collects around the room, never inside it. A permanent steel
   frame (side bars plus a ceiling lintel) marks the room's true
   boundary regardless of how much sandbag/concrete rubble is still
-  standing, and a landing platform mounted on its own posts above the
-  frame marks the helipad gate the chopper lines up with on its way in.
+  standing. The bunker itself is picked at random from five distinct
+  blueprints each mission -- a thick twin sandbag fortress, a wide wooden
+  crate barricade, tall single-file pillars under a heavy concrete slab,
+  a stepped ziggurat wall that rises in tiers toward the room, and a
+  mixed sandbag/crate defense -- so the structure you have to fight
+  through changes every time.
 
 ## Files
 

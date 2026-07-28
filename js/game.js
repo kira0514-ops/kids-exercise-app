@@ -28,8 +28,12 @@
   const BLOCK_BLAST_REACH_BONUS = 15;
   const TROOPS_X = W - 130;
   const BUNKER_HALF_WIDTH = 40;
-  const BUNKER_WALL_HEIGHT = 4;
-  const BUNKER_WALL_THICKNESS = 2;
+  // The room's interior stays a fixed size, but the wall/roof blueprint
+  // built around it varies by mission -- these track whichever blueprint
+  // generateBunker() picked last, so the shielding/frame code always
+  // matches what's actually standing.
+  let bunkerWallHeight = 4;
+  let bunkerWallThickness = 2;
 
   const hud = document.getElementById("hud");
   const turnIndicatorEl = document.getElementById("turn-indicator");
@@ -336,32 +340,57 @@
     return stack;
   }
 
-  // An enclosed bunker for Rescue Mission mode: thick sandbag walls on
-  // either side of the troops and a concrete roof spanning across the top,
-  // so the troops are genuinely boxed in until every wall/roof block is
-  // cleared -- a shot has to breach a wall or punch through the roof, not
-  // just land somewhere nearby.
+  // Several distinct blueprints for the bunker enclosing the troops, so
+  // replaying Rescue Mission doesn't always hand back the exact same
+  // structure -- different wall thickness, height, material, and stacking
+  // pattern, picked at random each time generateBunker() runs.
+  const BUNKER_LAYOUTS = [
+    // The original: thick twin sandbag walls, flat 2-row concrete roof.
+    { name: "sandbag-fortress", thickness: 2, height: 4, wallMaterial: "sandbag", roofRows: 2, taper: false },
+    // Thicker but shorter wooden crate barricades -- faster to punch
+    // through wall-to-wall, but there's more of it to clear sideways.
+    { name: "crate-barricade", thickness: 3, height: 3, wallMaterial: "crate", roofRows: 2, taper: false },
+    // Thin single-file pillars holding up a heavy 3-row concrete slab --
+    // easy to breach the walls, but the roof itself is the real obstacle.
+    { name: "pillar-slab", thickness: 1, height: 6, wallMaterial: "sandbag", roofRows: 3, taper: false },
+    // A stepped, ziggurat-style profile: the outer columns are shorter
+    // than the inner one, so the wall rises in tiers toward the room
+    // instead of presenting one flat face.
+    { name: "stepped-ziggurat", thickness: 3, height: 5, wallMaterial: "sandbag", roofRows: 2, taper: true },
+    // Alternating sandbag/crate rows for a mixed-material defense.
+    { name: "mixed-defense", thickness: 2, height: 4, wallMaterial: "row", roofRows: 2, taper: false },
+  ];
+
   function generateBunker(centerX) {
+    const layout = BUNKER_LAYOUTS[Math.floor(rand(0, BUNKER_LAYOUTS.length))];
+    bunkerWallThickness = layout.thickness;
+    bunkerWallHeight = layout.height;
+
     const groundY = terrainAt(centerX);
     const blocks = [];
 
     for (let side = -1; side <= 1; side += 2) {
-      for (let col = 0; col < BUNKER_WALL_THICKNESS; col++) {
+      for (let col = 0; col < layout.thickness; col++) {
         const bx = centerX + side * (BUNKER_HALF_WIDTH + BLOCK_W / 2 + col * BLOCK_W);
-        for (let row = 0; row < BUNKER_WALL_HEIGHT; row++) {
+        // Outer columns step down for the ziggurat blueprint; every other
+        // blueprint just uses the full wall height for every column.
+        const colHeight = layout.taper
+          ? Math.max(1, layout.height - (layout.thickness - 1 - col) * 2)
+          : layout.height;
+        for (let row = 0; row < colHeight; row++) {
           const by = groundY - BLOCK_H / 2 - row * BLOCK_H;
-          blocks.push(makeBlock(bx, by, "sandbag"));
+          const material = layout.wallMaterial === "row" ? (row % 2 === 0 ? "sandbag" : "crate") : layout.wallMaterial;
+          blocks.push(makeBlock(bx, by, material));
         }
       }
     }
 
-    const roofLeft = centerX - BUNKER_HALF_WIDTH - BUNKER_WALL_THICKNESS * BLOCK_W;
-    const roofRight = centerX + BUNKER_HALF_WIDTH + BUNKER_WALL_THICKNESS * BLOCK_W;
+    const roofLeft = centerX - BUNKER_HALF_WIDTH - layout.thickness * BLOCK_W;
+    const roofRight = centerX + BUNKER_HALF_WIDTH + layout.thickness * BLOCK_W;
     const roofBlockCount = Math.round((roofRight - roofLeft) / BLOCK_W);
     const roofStartX = roofLeft + BLOCK_W / 2;
-    const roofRows = 2;
-    for (let row = 0; row < roofRows; row++) {
-      const by = groundY - BLOCK_H / 2 - BUNKER_WALL_HEIGHT * BLOCK_H - row * BLOCK_H;
+    for (let row = 0; row < layout.roofRows; row++) {
+      const by = groundY - BLOCK_H / 2 - layout.height * BLOCK_H - row * BLOCK_H;
       for (let i = 0; i < roofBlockCount; i++) {
         blocks.push(makeBlock(roofStartX + i * BLOCK_W, by, "concrete"));
       }
@@ -379,7 +408,7 @@
     const groundY = terrainAt(TROOPS_X);
     const left = TROOPS_X - BUNKER_HALF_WIDTH;
     const right = TROOPS_X + BUNKER_HALF_WIDTH;
-    const top = groundY - BUNKER_WALL_HEIGHT * BLOCK_H;
+    const top = groundY - bunkerWallHeight * BLOCK_H;
     return x > left && x < right && y > top && y < groundY;
   }
 
@@ -441,7 +470,7 @@
     const groundY = terrainAt(TROOPS_X);
     const roomLeft = TROOPS_X - BUNKER_HALF_WIDTH;
     const roomRight = TROOPS_X + BUNKER_HALF_WIDTH;
-    const roomTop = groundY - BUNKER_WALL_HEIGHT * BLOCK_H;
+    const roomTop = groundY - bunkerWallHeight * BLOCK_H;
 
     const bA = blockAABB(b);
     const overlapsX = bA.maxX > roomLeft && bA.minX < roomRight;
@@ -2044,17 +2073,15 @@
     }
   }
 
-  // A permanent steel reinforcement frame around the troops' room, plus a
-  // landing platform mounted above it on its own support posts. Purely a
-  // visual marker -- unlike the sandbag/concrete blocks it's never
-  // destructible -- so the room's true boundary and the chopper's landing
-  // gate stay legible no matter how much rubble is piled up or cleared.
+  // A permanent steel reinforcement frame around the troops' room. Purely
+  // a visual marker -- unlike the sandbag/concrete blocks it's never
+  // destructible -- so the room's true boundary stays legible no matter
+  // how much rubble is piled up or cleared.
   function drawRoomFrame() {
     const groundY = terrainAt(TROOPS_X);
     const roomLeft = TROOPS_X - BUNKER_HALF_WIDTH;
     const roomRight = TROOPS_X + BUNKER_HALF_WIDTH;
-    const roomTop = groundY - BUNKER_WALL_HEIGHT * BLOCK_H;
-    const roofTop = roomTop - 2 * BLOCK_H;
+    const roomTop = groundY - bunkerWallHeight * BLOCK_H;
     const barW = 6;
 
     function steelBar(x, yTop, yBottom) {
@@ -2092,45 +2119,6 @@
     ctx.strokeStyle = "#161b1f";
     ctx.lineWidth = 1;
     ctx.strokeRect(roomLeft - barW / 2, roomTop - barW / 2, roomRight - roomLeft + barW, barW);
-    ctx.restore();
-
-    // Landing platform mounted above the frame on its own support posts --
-    // the helipad gate lined up directly over the room below.
-    const padY = roofTop - 26;
-    const padHalfW = BUNKER_HALF_WIDTH + 16;
-    steelBar(roomLeft + 3, padY, roomTop);
-    steelBar(roomRight - 3, padY, roomTop);
-
-    ctx.save();
-    ctx.setLineDash([4, 5]);
-    ctx.strokeStyle = "rgba(255,209,102,0.35)";
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.moveTo(TROOPS_X, padY);
-    ctx.lineTo(TROOPS_X, groundY - 20);
-    ctx.stroke();
-    ctx.restore();
-
-    ctx.save();
-    const deckGrad = ctx.createLinearGradient(0, padY - 6, 0, padY + 6);
-    deckGrad.addColorStop(0, "#8b98a3");
-    deckGrad.addColorStop(1, "#3a434b");
-    ctx.fillStyle = deckGrad;
-    ctx.fillRect(TROOPS_X - padHalfW, padY - 6, padHalfW * 2, 12);
-    ctx.strokeStyle = "#161b1f";
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(TROOPS_X - padHalfW, padY - 6, padHalfW * 2, 12);
-
-    ctx.strokeStyle = "#ffd166";
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(TROOPS_X, padY, padHalfW * 0.55, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.fillStyle = "#ffd166";
-    ctx.font = "bold 13px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("H", TROOPS_X, padY + 0.5);
     ctx.restore();
   }
 
