@@ -20,6 +20,11 @@
   const BLOCK_W = 26;
   const BLOCK_H = 20;
   const BLOCK_HP = 28;
+  // The hardened materials used for bunker roofs/caps take more punishment
+  // than plain sandbag/crate/wood -- a direct Standard Shell hit no longer
+  // guarantees a one-shot kill on them.
+  const BLOCK_HP_MULT = { concrete: 1.6, ice: 1.6, stone: 1.6 };
+  const RESCUE_SHELL_LIMIT = 14;
   const BLOCK_GRAVITY = GRAVITY * 1.2;
   const BLOCK_RESTITUTION = 0.3;
   const BLOCK_SLEEP_SPEED = 0.4;
@@ -104,6 +109,7 @@
   let clouds = [];
   let rocks = [];
   let birds = [];
+  let skyCraft = [];
   let strata = { p1: 0, p2: 0, p3: 0 };
   let grassTufts = [];
   let blocks = [];
@@ -217,6 +223,26 @@
     return birds;
   }
 
+  // A couple of background planes/UFOs drifting across the sky. Position
+  // is a pure function of elapsed time (like the chopper's rotor spin),
+  // so no per-frame state update is needed -- they keep gliding by even
+  // while the game is paused on an overlay.
+  function generateSkyCraft() {
+    const craft = [];
+    const count = Math.round(rand(2, 4));
+    for (let i = 0; i < count; i++) {
+      craft.push({
+        type: Math.random() < 0.3 ? "ufo" : "plane",
+        seedX: rand(0, 1),
+        y: rand(35, 150),
+        dir: Math.random() < 0.5 ? 1 : -1,
+        period: rand(16000, 30000),
+        bobSeed: rand(0, Math.PI * 2),
+      });
+    }
+    return craft;
+  }
+
   // The pinned-down squad waiting at the LZ in Rescue Mission mode.
   function generateTroops() {
     return [
@@ -306,6 +332,7 @@
   // and a sleep/wake cycle so settled stacks stop needing simulation.
   // ---------------------------------------------------------------------
   function makeBlock(x, y, material = "crate") {
+    const hp = Math.round(BLOCK_HP * (BLOCK_HP_MULT[material] || 1));
     return {
       x,
       y,
@@ -315,8 +342,8 @@
       vx: 0,
       vy: 0,
       av: 0,
-      hp: BLOCK_HP,
-      maxHp: BLOCK_HP,
+      hp,
+      maxHp: hp,
       awake: false,
       settleTimer: 0,
       material,
@@ -723,6 +750,7 @@
     clouds = generateClouds();
     rocks = generateRocks();
     birds = generateBirds();
+    skyCraft = generateSkyCraft();
     strata = generateStrata();
     grassTufts = generateGrassTufts();
     hud.classList.toggle("demolition", mode === "demolition");
@@ -730,6 +758,7 @@
     const p1 = makeTank("left", "Player 1", "#e63946", false);
     if (mode === "demolition") {
       tanks = [p1];
+      p1.ammo.standard = RESCUE_SHELL_LIMIT;
       blocks = generateBunker(TROOPS_X);
       shotsFired = 0;
       troops = generateTroops();
@@ -806,10 +835,12 @@
     document.getElementById("ammo-heavy").textContent = t.ammo.heavy;
     document.getElementById("ammo-rocket").textContent = t.ammo.rocket;
     document.getElementById("ammo-cluster").textContent = t.ammo.cluster;
+    document.getElementById("ammo-standard").textContent = mode === "demolition" ? t.ammo.standard : "∞";
     for (const btn of weaponButtons) {
       const wKey = btn.dataset.weapon;
       const w = WEAPONS[wKey];
-      const outOfAmmo = !w.infinite && t.ammo[wKey] <= 0;
+      const infinite = w.infinite && mode !== "demolition";
+      const outOfAmmo = !infinite && t.ammo[wKey] <= 0;
       btn.disabled = outOfAmmo || t.isAI;
       btn.classList.toggle("selected", wKey === selectedWeapon);
     }
@@ -921,7 +952,11 @@
   // ---------------------------------------------------------------------
   function fireShot(tank, dx, dy, dist) {
     const weapon = WEAPONS[selectedWeapon];
-    if (!weapon.infinite) {
+    // The base Shell is unlimited everywhere except Rescue Mission, where
+    // it's rationed too -- running the whole magazine dry before the LZ
+    // opens up is a real way to lose the mission.
+    const infinite = weapon.infinite && mode !== "demolition";
+    if (!infinite) {
       if (tank.ammo[selectedWeapon] <= 0) return;
       tank.ammo[selectedWeapon]--;
     }
@@ -1220,13 +1255,25 @@
               updateHud();
             }
           } else {
-            turnState = "aiming";
-            wind = Math.round(rand(-25, 25));
-            if (selectedWeapon !== "standard" && tanks[0].ammo[selectedWeapon] <= 0) {
-              selectedWeapon = "standard";
+            const ammo = tanks[0].ammo;
+            const totalAmmoLeft = ammo.standard + ammo.heavy + ammo.rocket + ammo.cluster;
+            if (totalAmmoLeft <= 0) {
+              roundOver = true;
+              statusIndicatorEl.textContent = "Mission Failed";
+              showOverlay(
+                "Mission Failed",
+                `Out of ordinance before the LZ ever opened up. ${shotsFired} shot${shotsFired === 1 ? "" : "s"} fired.`,
+                "New Mission"
+              );
+            } else {
+              turnState = "aiming";
+              wind = Math.round(rand(-25, 25));
+              if (ammo[selectedWeapon] <= 0) {
+                selectedWeapon = ["standard", "heavy", "rocket", "cluster"].find((k) => ammo[k] > 0);
+              }
+              updateWeaponUI();
+              updateHud();
             }
-            updateWeaponUI();
-            updateHud();
           }
         } else {
           const dead = tanks.filter((t) => t.hp <= 0);
@@ -1260,7 +1307,7 @@
   // the LZ was actually flyable, since the side walls sit outside this
   // corridor and never blocked the vertical approach in the first place.
   function isLZClear() {
-    const corridorHalfWidth = 22;
+    const corridorHalfWidth = 30;
     const left = TROOPS_X - corridorHalfWidth;
     const right = TROOPS_X + corridorHalfWidth;
     const groundY = terrainAt(TROOPS_X);
@@ -1336,6 +1383,97 @@
   // ---------------------------------------------------------------------
   // Rendering
   // ---------------------------------------------------------------------
+  // A small silhouette airliner: fuselage, tail fin, one visible wing, and
+  // a faint contrail trailing behind the direction of travel.
+  function drawPlane(x, y, dir) {
+    ctx.save();
+    ctx.translate(x, y);
+    if (dir < 0) ctx.scale(-1, 1);
+
+    ctx.strokeStyle = "rgba(255,255,255,0.4)";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-14, 2);
+    ctx.lineTo(-48, 2);
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(230,236,242,0.88)";
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 13, 3.4, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(80,90,100,0.6)";
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ctx.moveTo(-9, -1);
+    ctx.lineTo(-13, -8);
+    ctx.lineTo(-6, -1);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(-1, 0);
+    ctx.lineTo(5, 8);
+    ctx.lineTo(8, 7);
+    ctx.lineTo(2, -0.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // A cartoonish flying saucer: glowing underside, metallic hull, a dome,
+  // and three lights that blink in and out of sync with the game clock.
+  function drawUFO(x, y, o) {
+    ctx.save();
+    ctx.translate(x, y);
+
+    const glow = ctx.createRadialGradient(0, 2, 2, 0, 2, 22);
+    glow.addColorStop(0, "rgba(150,255,180,0.32)");
+    glow.addColorStop(1, "rgba(150,255,180,0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(0, 2, 22, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = "#71808f";
+    ctx.beginPath();
+    ctx.ellipse(0, 2, 14, 4.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(30,35,40,0.5)";
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(185,232,255,0.85)";
+    ctx.beginPath();
+    ctx.ellipse(0, -2, 7, 6, 0, Math.PI, 0);
+    ctx.fill();
+
+    const blink = Math.sin(performance.now() / 220 + o.bobSeed) > 0;
+    ctx.fillStyle = blink ? "rgba(255,90,90,0.9)" : "rgba(255,90,90,0.25)";
+    for (const dx of [-9, 0, 9]) {
+      ctx.beginPath();
+      ctx.arc(dx, 3, 1.3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Drifting background craft: x is a pure function of elapsed time, so
+  // each plane/UFO glides steadily across the sky and wraps around to the
+  // opposite edge without needing any per-frame position update.
+  function drawSkyCraft() {
+    const now = performance.now();
+    const span = W + 200;
+    for (const o of skyCraft) {
+      const t = (((now / o.period + o.seedX) % 1) + 1) % 1;
+      const x = o.dir === 1 ? -100 + t * span : W + 100 - t * span;
+      const y = o.y + Math.sin(now / 900 + o.bobSeed) * 4;
+      if (o.type === "ufo") drawUFO(x, y, o);
+      else drawPlane(x, y, o.dir);
+    }
+  }
+
   function drawBackground() {
     const sky = ctx.createLinearGradient(0, 0, 0, H);
     sky.addColorStop(0, "#3f7cad");
@@ -1377,6 +1515,8 @@
       ctx.quadraticCurveTo(b.x + 3, b.y - 5, b.x + 7, b.y);
       ctx.stroke();
     }
+
+    drawSkyCraft();
 
     // Hazy distant mountains for parallax depth behind the real terrain.
     ctx.beginPath();

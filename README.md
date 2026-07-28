@@ -82,7 +82,16 @@ sideways every turn. Destroy the other tank before it destroys you.
   wall that rises in tiers toward the room, a mixed sandbag/crate
   defense, and a castle-tower frame (slim wood posts, a glass/ice
   crossbeam, a stone cube pile capping it off) -- so the structure you
-  have to fight through changes every time.
+  have to fight through changes every time. The mission has real teeth:
+  the base Shell is rationed to 14 rounds instead of unlimited, the
+  hardened concrete/ice/stone blocks take more punishment than plain
+  sandbag/crate/wood, and the chopper needs a wider gap cleared overhead
+  before it'll come in -- run the whole magazine dry before the LZ opens
+  up and the mission ends in failure.
+- A couple of small planes and flying saucers drift across the sky in
+  every mode, purely for atmosphere -- their position is driven by the
+  clock rather than per-frame physics, so they glide by steadily even
+  while the game is paused on a win/lose screen.
 
 ## Files
 
